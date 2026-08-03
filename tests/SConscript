@@ -1,0 +1,119 @@
+# tests/SConscript — opt-in build of the idtx-core test binary.
+#
+# Consumed by the top-level SConstruct when `scons tests=1` is passed.
+# We compile the exact same source files the server links against, minus
+# source/main.cpp, so we can drive the server in-process from doctest.
+#
+# All paths are anchored at the project root ('#/...') because SConscript
+# runs with the SConscript's own directory as the base for relative paths.
+# Without anchoring you end up with include paths like 'tests\source' or
+# obj files under 'tests\build\...', both of which break the build.
+
+import os
+
+Import('env', 'libs', 'usd_root', 'shared_thirdparty_root')
+
+test_env = env.Clone()
+
+# Add tests/ and tests/thirdparty/ to the include search paths (both rooted
+# at the project root so they resolve regardless of where SCons decides to
+# emit the object files).
+test_env.Append(CPPPATH=[
+    "#/tests",
+    "#/tests/thirdparty",
+])
+
+# ---------------------------------------------------------------------------
+# The main SConstruct populates CPPPATH with entries like
+# "./thirdparty/vcpkg_installed/...", "./shared/include" and "./source".
+# Those are *relative to the SConstruct's directory* (the project root),
+# but SCons resolves them relative to the currently executing SConscript's
+# directory. Once we're inside tests/SConscript, they'd resolve to
+# tests/thirdparty/vcpkg_installed/..., which does not exist.
+#
+# Replace every relative CPPPATH entry the parent env supplied with the
+# same path anchored at the project root ('#'). Absolute paths and entries
+# that are already anchored at '#' are left alone.
+# ---------------------------------------------------------------------------
+
+def _anchor(entry):
+    e = str(entry)
+    # Already anchored at repo root, or absolute — leave it.
+    if e.startswith("#") or os.path.isabs(e):
+        return e
+    if e.startswith("./"):
+        e = e[2:]
+    return "#/" + e
+
+test_env['CPPPATH'] = [_anchor(p) for p in test_env['CPPPATH']]
+
+# Same reasoning for LIBPATH: entries like "./thirdparty/vcpkg_installed/..."
+# in the parent env would otherwise be looked for under tests/... .
+if 'LIBPATH' in test_env['ENV'] or 'LIBPATH' in test_env.Dictionary():
+    lp = test_env.get('LIBPATH', [])
+    test_env['LIBPATH'] = [_anchor(p) for p in lp]
+
+# ---------------------------------------------------------------------------
+# Collect sources (all anchored at project root).
+# ---------------------------------------------------------------------------
+
+server_sources = list(set(
+    env.Glob("#/source/*.cpp")
+    + env.Glob("#/source/**/*.cpp")
+))
+
+def _is_server_main(node):
+    p = str(node).replace("\\", "/")
+    return p.endswith("/source/main.cpp") or p.endswith("source/main.cpp")
+
+filtered_server_sources = [n for n in server_sources if not _is_server_main(n)]
+
+proto_sources = env.Glob("#/shared/build/proto/*.pb.cc")
+tests_sources = env.Glob("#/tests/*.cpp") + env.Glob("#/tests/support/*.cpp")
+
+all_sources = list(set(filtered_server_sources + proto_sources + tests_sources))
+
+# ---------------------------------------------------------------------------
+# Emit a dedicated set of .obj nodes for the test binary. We compute each
+# object path as "#/build/tests_obj/<rel>" where <rel> is the source's path
+# relative to the project root. Using env.Glob("#/...") returns *absolute*
+# nodes on Windows, so we must reduce them via os.path.relpath rather than
+# any string prefix trickery (otherwise the drive letter's colon leaks into
+# the object path and breaks the build).
+# ---------------------------------------------------------------------------
+
+project_root = Dir('#').abspath
+
+def _obj_for(src):
+    """Map a source .cpp/.cc under the project root to a per-source object
+    file under build/tests_obj/, preserving the source tree layout."""
+    src_path = getattr(src, 'abspath', None) or str(src)
+    rel = os.path.relpath(src_path, project_root).replace("\\", "/")
+    # Drop any leading "./" that relpath may have left behind.
+    while rel.startswith("./"):
+        rel = rel[2:]
+    stem, _ = os.path.splitext(rel)
+    return "#/build/tests_obj/" + stem
+
+test_objs = []
+for s in all_sources:
+    test_objs.extend(test_env.Object(target=_obj_for(s), source=s))
+
+# Build the test executable itself at the project root's build/ dir.
+test_program = test_env.Program(
+    target='#/build/idtx-core-tests',
+    source=test_objs,
+    LIBS=libs
+)
+
+# Install next to the main binary so tests find the DLLs/plugins already
+# installed by the primary build target.
+install_test = test_env.Install('#/bin', test_program)
+
+# Wire the test targets into SCons' default target set so that a plain
+# `scons tests=1` (no explicit target) actually builds & installs them
+# in addition to the main binary.
+test_env.Default(test_program, install_test)
+
+# Also expose an explicit `tests` alias for `scons tests=1 tests`.
+test_env.Alias('tests', [test_program, install_test])

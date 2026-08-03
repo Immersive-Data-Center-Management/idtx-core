@@ -1,0 +1,14 @@
+IDTX Core - Version 0.0.1 - Mai 7, 2026
+
+Dependency: OpenUSD
+Version: v26.08
+License: Tomorrow Open Source Technology License 1.0 (Apache-2.0 variant)
+Homepage: https://github.com/PixarAnimationStudios/OpenUSD
+Description: Pixar Universal Scene Description - Efficient, scalable system for authoring, reading, and streaming scene descriptions for 3D applications.
+
+
+Dependency: DocTest
+Version: v2.5.3
+License: MIT
+Homepage: https://github.com/doctest/doctest
+Description: The fastest feature-rich C++11/14/17/20/23 single-header testing framework.

@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">  
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+    <LanguageStandard>stdcpp20</LanguageStandard>
+  </PropertyGroup>
+  
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{BBD12751-ADA5-3D98-A09C-E95CDFF4B28F}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>IDTXCore</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+      <PlatformToolset>v143</PlatformToolset>
+      <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+
+  <!-- Common compiler settings -->
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+
+  <!-- Windows-specific include paths -->
+  <ItemDefinitionGroup Condition="'$(OS)'=='Windows_NT'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>thirdparty/openusd-26.05/include;thirdparty/vcpkg_installed\x64-windows\include;shared/include;source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>thirdparty/openusd-26.05/include;thirdparty/vcpkg_installed\x64-windows\include;shared/include;source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+
+  <!-- macOS-specific include paths -->
+  <ItemDefinitionGroup Condition="'$(OS)'!='Windows_NT'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>/Applications/Xcode_15.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1;/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include;/Applications/Xcode_15.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/15.0.0/include;thirdparty/openusd-26.05/include;thirdparty/vcpkg_installed/arm64-osx/include;shared/include;source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>/Applications/Xcode_15.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1;/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include;/Applications/Xcode_15.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/15.0.0/include;thirdparty/openusd-26.05/include;thirdparty/vcpkg_installed/arm64-osx/include;shared/include;source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClCompile Include="source\app\Application.cpp" />
+    <ClCompile Include="source\app\ApplicationContext.cpp" />
+    <ClCompile Include="source\controller\AuthController.cpp" />
+    <ClCompile Include="source\controller\FileServingController.cpp" />
+    <ClCompile Include="source\controller\SessionController.cpp" />
+    <ClCompile Include="source\controller\WebSocketController.cpp" />
+    <ClCompile Include="source\controller\HealthController.cpp" />
+    <ClCompile Include="source\main.cpp" />
+    <ClCompile Include="source\middleware\JwtAuthHandler.cpp" />
+    <ClCompile Include="source\middleware\OidcConfiguration.cpp" />
+    <ClCompile Include="source\server\Server.cpp" />
+    <ClCompile Include="source\session\SessionManager.cpp" />
+    <ClCompile Include="source\session\StageNoticeListener.cpp" />
+    <ClCompile Include="source\session\TransformDispatcher.cpp" />
+    <ClCompile Include="source\thumbnails\PlaceholderThumbnailGenerator.cpp" />
+    <ClCompile Include="source\thumbnails\ThumbnailWorker.cpp" />
+    <ClCompile Include="source\utils\HttpClient.cpp" />
+    <ClCompile Include="tests\FileServingTests.cpp" />
+    <ClCompile Include="tests\main.cpp" />
+    <ClCompile Include="tests\SessionRestTests.cpp" />
+    <ClCompile Include="tests\StageReloadTests.cpp" />
+    <ClCompile Include="tests\support\HttpTestClient.cpp" />
+    <ClCompile Include="tests\support\ProtoHelpers.cpp" />
+    <ClCompile Include="tests\support\TestServer.cpp" />
+    <ClCompile Include="tests\support\UsdFixture.cpp" />
+    <ClCompile Include="tests\support\WsTestClient.cpp" />
+    <ClCompile Include="tests\WebSocketTests.cpp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include=".clinerules\memory-bank.md" />
+    <Content Include=".clinerules\operation.md" />
+    <Content Include=".clinerules\se-bestpractices.md" />
+    <Content Include=".dockerignore" />
+    <Content Include="Dockerfile" />
+    <Content Include="memory-bank\consolidated_learnings.md" />
+    <Content Include="memory-bank\raw_reflection_log.md" />
+    <Content Include="README.md" />
+    <Content Include="SConstruct" />
+    <Content Include="scons\openusd.py" />
+    <Content Include="scons\protobuf.py" />
+    <Content Include="scons\vcpkg.py" />
+    <Content Include="shared\proto_messages\base.proto" />
+    <Content Include="shared\proto_messages\session.proto" />
+    <Content Include="shared\proto_messages\transform.proto" />
+    <Content Include="tests\SConscript" />
+    <Content Include="tests\TEST_PLAN.md" />
+    <Content Include="vcpkg.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClInclude Include="shared\include\idtx\proto\base.pb.h" />
+    <ClInclude Include="shared\include\idtx\proto\session.pb.h" />
+    <ClInclude Include="shared\include\idtx\proto\transform.pb.h" />
+    <ClInclude Include="shared\include\idtx\utils\Logger.h" />
+    <ClInclude Include="source\app\Application.h" />
+    <ClInclude Include="source\app\ApplicationContext.h" />
+    <ClInclude Include="source\controller\AuthController.h" />
+    <ClInclude Include="source\controller\FileServingController.h" />
+    <ClInclude Include="source\dto\AuthDto.h" />
+    <ClInclude Include="source\dto\ErrorResponse.h" />
+    <ClInclude Include="source\dto\JsonDto.h" />
+    <ClInclude Include="source\dto\SessionDto.h" />
+    <ClInclude Include="source\controller\SessionController.h" />
+    <ClInclude Include="source\controller\WebSocketController.h" />
+    <ClInclude Include="source\controller\HealthController.h" />
+    <ClInclude Include="source\middleware\JwtAuthHandler.h" />
+    <ClInclude Include="source\middleware\OidcConfiguration.h" />
+    <ClInclude Include="source\routes\http\AuthRoutes.h" />
+    <ClInclude Include="source\routes\http\FileServingRoutes.h" />
+    <ClInclude Include="source\routes\http\HealthRoutes.h" />
+    <ClInclude Include="source\routes\http\SessionRoutes.h" />
+    <ClInclude Include="source\routes\RouteRegistry.h" />
+    <ClInclude Include="source\routes\websocket\WebSocketRoutes.h" />
+    <ClInclude Include="source\server\Server.h" />
+    <ClInclude Include="source\session\Session.h" />
+    <ClInclude Include="source\session\SessionManager.h" />
+    <ClInclude Include="source\session\StageNoticeListener.h" />
+    <ClInclude Include="source\session\TransformDispatcher.h" />
+    <ClInclude Include="source\thumbnails\MiniPng.h" />
+    <ClInclude Include="source\thumbnails\PlaceholderThumbnailGenerator.h" />
+    <ClInclude Include="source\thumbnails\ThumbnailGenerator.h" />
+    <ClInclude Include="source\thumbnails\ThumbnailWorker.h" />
+    <ClInclude Include="source\utils\Environment.h" />
+    <ClInclude Include="source\utils\HttpClient.h" />
+    <ClInclude Include="source\utils\IDTXCoreLogger.h" />
+    <ClInclude Include="source\utils\UsdFileLocator.h" />
+    <ClInclude Include="source\utils\Uuid.h" />
+    <ClInclude Include="tests\support\HttpTestClient.h" />
+    <ClInclude Include="tests\support\ProtoHelpers.h" />
+    <ClInclude Include="tests\support\TestServer.h" />
+    <ClInclude Include="tests\support\UsdFixture.h" />
+    <ClInclude Include="tests\support\WsTestClient.h" />
+    <ClInclude Include="tests\thirdparty\doctest.h" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="source\routes\websocket\" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

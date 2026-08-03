@@ -1,0 +1,19 @@
+{
+  "name": "idtx-core",
+  "version": "0.1.0",
+  "dependencies": [
+    "protobuf",
+    "utf8-range",
+    "crow",
+    "cpr",
+    "cppcodec",
+    "nlohmann-json",
+    "boost-uuid",
+    "boost-system",
+    "boost-url",
+    "boost-beast",
+    "jwt-cpp",
+    "picojson"
+  ],
+  "builtin-baseline": "f3e10653cc27d62a37a3763cd84b38bca07c6075"
+}
