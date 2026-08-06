@@ -1,14 +1,43 @@
-IDTX Core - Version 0.0.1 - Mai 7, 2026
+IDTX Core - Version 0.1.0 - August 6, 2026
+
+Dependency: Crow
+Version: 1.3.2
+License: BSD-3-Clause
+Homepage: https://github.com/CrowCpp/Crow
+Description: C++ micro web framework for building REST APIs. Provides HTTP server functionality, routing, middleware support, and WebSocket capabilities.
+
+Dependency: nlohmann-json
+Version: 3.12.0
+License: MIT
+Homepage: https://github.com/nlohmann/json
+Description: JSON for Modern C++. Header-only library providing intuitive syntax for working with JSON in modern C++ applications.
+
+Dependency: jwt-cpp
+Version: 0.7.2
+License: MIT
+Homepage: https://github.com/Thalhammer/jwt-cpp
+Description: Header-only library for creating and validating JSON Web Tokens in C++. Supports multiple algorithms and provides OAuth2.0 integration.
+
+Dependency: CPR (C++ Requests)
+Version: 1.14.2
+License: MIT
+Homepage: https://github.com/libcpr/cpr
+Description: C++ HTTP requests library. Modern wrapper around libcurl inspired by Python Requests, providing simple API for HTTP client operations.
+
+Dependency: Boost Libraries
+Version: 1.91.0
+License: BSL-1.0 (Boost Software License)
+Homepage: https://www.boost.org/
+Description: Collection of peer-reviewed portable C++ libraries. Used components: UUID (identifier generation), System (error handling), URL (URL parsing), Beast (HTTP/WebSocket protocol implementations).
+
+Dependency: DocTest
+Version: v2.5.3
+License: MIT
+Homepage: https://github.com/doctest/doctest
+Description: Fast feature-rich C++ single-header testing framework for unit and integration tests.
 
 Dependency: OpenUSD
 Version: v26.08
 License: Tomorrow Open Source Technology License 1.0 (Apache-2.0 variant)
 Homepage: https://github.com/PixarAnimationStudios/OpenUSD
 Description: Pixar Universal Scene Description - Efficient, scalable system for authoring, reading, and streaming scene descriptions for 3D applications.
-
-
-Dependency: DocTest
-Version: v2.5.3
-License: MIT
-Homepage: https://github.com/doctest/doctest
-Description: The fastest feature-rich C++11/14/17/20/23 single-header testing framework.
