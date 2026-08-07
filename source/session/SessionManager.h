@@ -105,8 +105,7 @@ public:
      *   4. relies on the listener to broadcast the surviving changes to
      *      attached clients — the listener drops broadcasts for any
      *      attribute whose session-layer opinion still wins by
-     *      composition strength (see §3.4 of
-     *      docs/plans/reload-on-upload.md).
+     *      composition strength
      *
      * Safe to call from any thread. Failures inside a single session are
      * logged but do not affect other sessions.

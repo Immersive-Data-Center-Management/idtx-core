@@ -19,8 +19,10 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <regex>
 #include <string>
+#include <system_error>
 
 #include <idtx/utils/Logger.h>
 
@@ -44,7 +46,8 @@ public:
         InvalidPath,
         NotFound,
         NotAUsdFile,
-        OutsideRoot
+        OutsideRoot,
+        PermissionDenied
     };
 
     explicit UsdFileLocator(std::string uploads_root = "uploads")
@@ -247,6 +250,55 @@ public:
     }
 
     /**
+     * @brief Ensure the configured uploads root exists and is writable.
+     *
+     * Intended to be called once at startup so that later per-request calls to
+     * @c EnsureDirectoryInsideRoot never fail merely because the root itself is
+     * missing (e.g. a freshly-mounted, empty volume in a container). The
+     * underlying @c std::error_code is surfaced in the log so permission vs.
+     * missing-path failures are immediately diagnosable.
+     *
+     * @param ec  Populated with the failing operation's error code, if any.
+     * @return @c Status::Ok when the root exists and is writable; otherwise
+     *         @c PermissionDenied or @c NotFound with @p ec describing why.
+     */
+    Status EnsureRootExists(std::error_code& ec) const
+    {
+        ec.clear();
+        std::filesystem::create_directories(m_root_, ec);
+        if (ec)
+        {
+            const Status s = ClassifyFilesystemError(ec);
+            IDTX_LOG(IDTX_ERROR, "Failed to create uploads root '{}': {} ({})",
+                     m_root_, ec.message(), StatusToString(s));
+            return s;
+        }
+
+        // Probe writability by creating (and removing) a temporary marker.
+        const std::filesystem::path probe =
+            std::filesystem::path(m_root_) / ".idtx-write-test";
+        {
+            std::error_code probe_ec;
+            std::filesystem::remove(probe, probe_ec); // best-effort pre-clean
+        }
+        std::ofstream test(probe, std::ios::out | std::ios::trunc);
+        if (!test)
+        {
+            ec = std::make_error_code(std::errc::permission_denied);
+            IDTX_LOG(IDTX_ERROR,
+                     "Uploads root '{}' exists but is not writable by this process.",
+                     m_root_);
+            return Status::PermissionDenied;
+        }
+        test.close();
+        std::error_code rmec;
+        std::filesystem::remove(probe, rmec);
+
+        IDTX_LOG(IDTX_INFO, "Uploads root ready at '{}'.", m_root_);
+        return Status::Ok;
+    }
+
+    /**
      * @brief Create a directory and re-verify it stays inside the uploads root.
      *        Used both for the upload target directory and for its @c thumbs/
      *        subdirectory. Follows the same "canonicalise the parent" pattern
@@ -256,13 +308,31 @@ public:
                                      std::error_code& ec) const
     {
         std::filesystem::create_directories(dir, ec);
-        if (ec) return Status::NotFound;
+        if (ec)
+        {
+            const Status s = ClassifyFilesystemError(ec);
+            IDTX_LOG(IDTX_ERROR, "Failed to create directory '{}': {} ({})",
+                     dir.string(), ec.message(), StatusToString(s));
+            return s;
+        }
 
         std::filesystem::path canonical_root = std::filesystem::canonical(m_root_, ec);
-        if (ec) return Status::NotFound;
+        if (ec)
+        {
+            const Status s = ClassifyFilesystemError(ec);
+            IDTX_LOG(IDTX_ERROR, "Uploads root '{}' is not accessible: {} ({})",
+                     m_root_, ec.message(), StatusToString(s));
+            return s;
+        }
 
         std::filesystem::path canonical_dir = std::filesystem::canonical(dir, ec);
-        if (ec) return Status::NotFound;
+        if (ec)
+        {
+            const Status s = ClassifyFilesystemError(ec);
+            IDTX_LOG(IDTX_ERROR, "Directory '{}' is not accessible: {} ({})",
+                     dir.string(), ec.message(), StatusToString(s));
+            return s;
+        }
 
         auto mismatch_it = std::mismatch(canonical_root.begin(), canonical_root.end(),
                                          canonical_dir.begin(), canonical_dir.end());
@@ -341,11 +411,29 @@ public:
             case Status::NotFound:         return "NotFound";
             case Status::NotAUsdFile:      return "NotAUsdFile";
             case Status::OutsideRoot:      return "OutsideRoot";
+            case Status::PermissionDenied: return "PermissionDenied";
         }
         return "Unknown";
     }
 
 private:
+    /**
+     * @brief Map a filesystem @c std::error_code onto the locator's @c Status.
+     *        Permission-related errors get their own status so callers can log
+     *        (and, if they choose, respond) differently from a genuinely
+     *        missing path.
+     */
+    static Status ClassifyFilesystemError(const std::error_code& ec) noexcept
+    {
+        if (ec == std::errc::permission_denied
+            || ec == std::errc::operation_not_permitted
+            || ec == std::errc::read_only_file_system)
+        {
+            return Status::PermissionDenied;
+        }
+        return Status::NotFound;
+    }
+
     std::string m_root_;
 };
 

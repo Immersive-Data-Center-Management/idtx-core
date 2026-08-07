@@ -13,9 +13,6 @@
  *   - IHDR: 8-bit, colour type 2 (RGB), no interlace.
  *   - IDAT: single zlib stream, one or more stored deflate blocks.
  *   - IEND.
- *
- * The writer is header-only and dependency-free so no changes to vcpkg.json
- * are required.
  */
 #pragma once
 

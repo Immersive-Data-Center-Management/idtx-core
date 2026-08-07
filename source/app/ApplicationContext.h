@@ -17,7 +17,9 @@
 
 #include <cstdlib>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <system_error>
 
 #include "controller/AuthController.h"
 #include "controller/HealthController.h"
@@ -76,7 +78,30 @@ struct ApplicationContext
         // map a request-supplied path to an on-disk USD file. Keeping a
         // single locator keeps the validation rules consistent across
         // file-serving and session creation.
-        ctx.usdFileLocator        = std::make_shared<idtx::utils::UsdFileLocator>();
+        //
+        // The uploads root is configurable via IDTX_UPLOADS_ROOT.
+        const std::string uploads_root =
+            EnvironmentUtils::get_env("IDTX_UPLOADS_ROOT").value_or("/app/uploads");
+        ctx.usdFileLocator        =
+            std::make_shared<idtx::utils::UsdFileLocator>(uploads_root);
+
+        // Fail fast: make sure the uploads root exists and is writable by this
+        // process *now*, at startup, rather than surfacing an opaque
+        // "Failed to prepare target directory" on the first upload.
+        {
+            std::error_code root_ec;
+            const auto root_status = ctx.usdFileLocator->EnsureRootExists(root_ec);
+            if (root_status != idtx::utils::UsdFileLocator::Status::Ok)
+            {
+                throw std::runtime_error(
+                    "Uploads root '" + uploads_root + "' is not usable ("
+                    + idtx::utils::UsdFileLocator::StatusToString(root_status)
+                    + (root_ec ? ": " + root_ec.message() : std::string{})
+                    + "). Set IDTX_UPLOADS_ROOT and ensure the directory is "
+                      "writable by the server process (check volume ownership / "
+                      "securityContext.fsGroup in Kubernetes).");
+            }
+        }
 
         // Thumbnail generation is opt-out via IDTX_THUMBNAIL_ENABLED=false.
         // The placeholder generator is safe to run in the current container
@@ -116,8 +141,7 @@ struct ApplicationContext
         // Constructed before the FileServingController so the latter can be
         // wired up with a link back to the manager: an upload that replaces
         // an existing USD file will then trigger a root-layer reload on
-        // every live session bound to that file (see
-        // docs/plans/reload-on-upload.md).
+        // every live session bound to that file.
         ctx.sessionManager        = std::make_shared<idtx::session::SessionManager>(
                                         *ctx.usdFileLocator);
 

@@ -113,13 +113,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include=".clinerules\memory-bank.md" />
-    <Content Include=".clinerules\operation.md" />
-    <Content Include=".clinerules\se-bestpractices.md" />
     <Content Include=".dockerignore" />
     <Content Include="Dockerfile" />
-    <Content Include="memory-bank\consolidated_learnings.md" />
-    <Content Include="memory-bank\raw_reflection_log.md" />
     <Content Include="README.md" />
     <Content Include="SConstruct" />
     <Content Include="scons\openusd.py" />
