@@ -1,13 +1,5 @@
-// tests/StageReloadTests.cpp — covers the reload-on-upload feature described
-// in docs/plans/reload-on-upload.md.
+// tests/StageReloadTests.cpp
 //
-// Two scenarios:
-//   A. When an upload replaces the backing USD file of a live session, every
-//      attached client receives a TransformBroadcast reflecting the new
-//      on-disk contents.
-//   B. When a client has already authored a stronger opinion on the session
-//      layer (via a TransformUpdate), the on-disk change is masked by
-//      composition and no additional TransformBroadcast reaches the client.
 
 #include "thirdparty/doctest/doctest.h"
 

@@ -71,15 +71,16 @@ std::string ExtractPartFilename(const crow::multipart::part& part)
 
 } // namespace
 
-// ---------------------------------------------------------------------------
-// Existing endpoints
-// ---------------------------------------------------------------------------
-
 idtx::utils::UsdFileLocator& FileServingController::Locator()
 {
     if (!m_locator_) m_locator_ = std::make_shared<idtx::utils::UsdFileLocator>();
     return *m_locator_;
 }
+
+// ---------------------------------------------------------------------------
+// File Serving
+// ---------------------------------------------------------------------------
+
 
 crow::response FileServingController::GetFileList(const crow::request& req)
 {
@@ -282,9 +283,21 @@ crow::response FileServingController::UploadFile(const crow::request& req)
         auto dir_status = Locator().EnsureDirectoryInsideRoot(parent_dir, ec);
         if (dir_status != idtx::utils::UsdFileLocator::Status::Ok)
         {
-            IDTX_LOG(IDTX_ERROR, "Cannot create upload directory '{}': {}",
+            IDTX_LOG(IDTX_ERROR, "Cannot create upload directory '{}': {} ({})",
                      parent_dir.string(),
-                     idtx::utils::UsdFileLocator::StatusToString(dir_status));
+                     idtx::utils::UsdFileLocator::StatusToString(dir_status),
+                     ec ? ec.message() : "no errno");
+
+            // A permission problem is an operator/deployment misconfiguration
+            // (e.g. the uploads volume is not writable by the server's user),
+            // not a client error — surface it distinctly so it is not confused
+            // with a bad request and is easy to spot in monitoring.
+            if (dir_status == idtx::utils::UsdFileLocator::Status::PermissionDenied)
+            {
+                return idtx::dto::make_error(500, "internal_error",
+                    "Upload target directory is not writable by the server. "
+                    "This is a server configuration issue.");
+            }
             return idtx::dto::make_error(500, "internal_error",
                                          "Failed to prepare target directory.");
         }

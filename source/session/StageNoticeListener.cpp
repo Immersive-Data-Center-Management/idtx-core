@@ -106,14 +106,14 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
     session->last_origin = nullptr;
 
     // -----------------------------------------------------------------
-    // Reload branch (§3.4 of docs/plans/reload-on-upload.md).
+    // Reload branch
     //
     // SessionManager::ReloadSessionsForFile flipped `reload_in_progress`
     // right before calling SdfLayer::Reload(force=true) on the root
     // layer. In that notice the affected paths reflect *authored* changes
     // on the root layer, but the resolved value on the composed stage may
     // still be masked by an opinion on the session layer (where every
-    // client-driven edit lives — see §3.1). We must therefore consult the
+    // client-driven edit lives). We must therefore consult the
     // session layer directly and drop any broadcast whose value the
     // client already holds by composition strength.
     //

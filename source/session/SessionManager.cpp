@@ -116,7 +116,6 @@ std::shared_ptr<Session> SessionManager::Create(const std::string& usd_file,
     //      does not clobber live session-authored overrides.
     //   2. StageNoticeListener can decide whether the on-disk change is
     //      visible to the client by inspecting the session layer directly
-    //      (§3.4 of docs/plans/reload-on-upload.md).
     stage->SetEditTarget(pxr::UsdEditTarget(stage->GetSessionLayer()));
 
     auto session        = std::make_shared<Session>();

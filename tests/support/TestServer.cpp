@@ -177,6 +177,11 @@ TestServer::TestServer(Options opts)
     SetEnv("SERVER_PORT", std::to_string(m_port_));
     SetEnv("IDTX_THUMBNAIL_ENABLED", m_opts_.thumbnails_enabled ? "true" : "false");
     SetEnv("IDTX_THUMBNAIL_SIZE",    std::to_string(m_opts_.thumbnail_size));
+    // Pin the uploads root to this test's isolated temp directory. The server
+    // now defaults IDTX_UPLOADS_ROOT to an absolute container path
+    // ("/app/uploads"), so tests must override it explicitly rather than rely
+    // on the process working directory.
+    SetEnv("IDTX_UPLOADS_ROOT", (m_work_dir_ / "uploads").string());
 
     m_ctx_    = std::make_unique<ApplicationContext>(ApplicationContext::create());
     m_server_ = std::make_unique<idtx::core::Server>(*m_ctx_);

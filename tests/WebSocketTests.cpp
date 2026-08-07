@@ -1,11 +1,5 @@
-// tests/WebSocketTests.cpp — covers requirements 5, 6, 7, 8, 9, 10.
+// tests/WebSocketTests.cpp
 //
-// 5. WS handshake → server-sent Handshake frame
-// 6. TransformUpdate → Ack + on-disk stage reflects new translate
-// 7. Second WS is rejected in single_edit
-// 8. After DELETE, a collaborative_edit session can be opened
-// 9. Two WS clients attach to the collab session
-// 10. TransformUpdate broadcasts to peer
 
 #include "thirdparty/doctest/doctest.h"
 

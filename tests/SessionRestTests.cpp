@@ -1,5 +1,4 @@
-// tests/SessionRestTests.cpp — covers requirement 4 (initiate SingleEdit
-// session) and exercises the mode roundtrip introduced by the plan.
+// tests/SessionRestTests.cpp
 
 #include "thirdparty/doctest/doctest.h"
 

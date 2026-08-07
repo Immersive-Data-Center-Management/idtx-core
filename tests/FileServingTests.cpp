@@ -1,8 +1,5 @@
-// tests/FileServingTests.cpp — covers requirements 1, 2, 3 from the plan.
+// tests/FileServingTests.cpp
 //
-// 1. Backend spawned with a canonical cube.usda in uploads/
-// 2. GetFileList / FileExists / ServeFile behave as documented
-// 3. Upload works both with and without the thumbnail worker
 
 #include "thirdparty/doctest/doctest.h"
 
