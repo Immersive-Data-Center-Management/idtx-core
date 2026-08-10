@@ -9,12 +9,15 @@
  */
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include <crow/http_request.h>
 #include <crow/http_response.h>
 
 #include <idtx/utils/Logger.h>
+
+#include "middleware/RateLimiter.h"
 
 class AuthController
 {
@@ -35,6 +38,26 @@ public:
                    std::string clientSecret,
                    std::string scope);
     ~AuthController() = default;
+
+    /**
+     * @brief Inject the shared login throttler used for brute-force defense.
+     *
+     * The same @c LoginThrottler instance is owned by the rate-limiting
+     * middleware, which short-circuits already-locked-out sources. The
+     * controller reports each authentication outcome (failure/success) into it
+     * so that repeated failures accrue toward a lockout. Optional: when unset,
+     * the controller still functions but contributes no lockout accounting.
+     *
+     * @param throttler         Shared throttler instance (may be null).
+     * @param trustForwardedFor Whether to derive the client key from
+     *                          X-Forwarded-For (true behind an ingress/LB).
+     */
+    void SetLoginThrottler(std::shared_ptr<idtx::middleware::LoginThrottler> throttler,
+                           bool trustForwardedFor)
+    {
+        m_loginThrottler_    = std::move(throttler);
+        m_trustForwardedFor_ = trustForwardedFor;
+    }
 
     /**
      * @brief Handles POST /api/v1/auth/login.
@@ -61,4 +84,9 @@ private:
     std::string m_clientId_;
     std::string m_clientSecret_;
     std::string m_scope_;
+
+    /// Shared brute-force throttler (optional; injected post-construction).
+    std::shared_ptr<idtx::middleware::LoginThrottler> m_loginThrottler_;
+    /// Whether to trust X-Forwarded-For when deriving the client key.
+    bool m_trustForwardedFor_ = true;
 };

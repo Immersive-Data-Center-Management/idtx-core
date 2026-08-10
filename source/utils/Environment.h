@@ -3,6 +3,8 @@
 #include <fstream>
 #include <string>
 #include <optional>
+#include <charconv>
+#include <cstdint>
 
 class EnvironmentUtils {
 public:
@@ -58,5 +60,26 @@ public:
         }
         
         return std::nullopt;
+    }
+
+    /**
+     * @brief Read an unsigned integer environment variable with a fallback.
+     *
+     * Invalid or absent values fall back to @p fallback.
+     */
+    inline static std::uint64_t get_env_u64(const char* name, std::uint64_t fallback)
+    {
+        if (auto v = EnvironmentUtils::get_env(name))
+        {
+            std::uint64_t out{};
+            const auto* first = v->data();
+            const auto* last  = v->data() + v->size();
+            if (auto [p, ec] = std::from_chars(first, last, out);
+                ec == std::errc() && p == last)
+            {
+                return out;
+            }
+        }
+        return fallback;
     }
 };

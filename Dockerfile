@@ -80,6 +80,24 @@ ENV LD_LIBRARY_PATH=/app
 # Set environment for default upload path
 ENV IDTX_UPLOADS_ROOT=/app/uploads
 
+# --- Security / anti-abuse safety net (in-process rate limiting) ---------
+# These are a per-replica safety net that complements the primary throttling
+# expected at the Kubernetes ingress / cloud load balancer. All values are
+# optional; the application ships with conservative built-in defaults.
+#
+#   SERVER_TIMEOUT_SECONDS        Idle connection timeout (Slowloris guard).
+#   RL_GLOBAL_MAX_REQUESTS        Per-IP request budget per RL_GLOBAL_WINDOW_SECONDS.
+#   RL_GLOBAL_WINDOW_SECONDS      Window length for the global budget.
+#   RL_LOGIN_MAX_REQUESTS         Per-IP login request budget per RL_LOGIN_WINDOW_SECONDS.
+#   RL_LOGIN_WINDOW_SECONDS       Window length for the login budget.
+#   RL_LOGIN_MAX_FAILURES         Failed logins before a source is locked out.
+#   RL_LOGIN_FAILURE_WINDOW_SECONDS  Window in which failures accumulate.
+#   RL_LOGIN_LOCKOUT_SECONDS      Lockout duration once the failure threshold trips.
+#   RL_LOGIN_MAX_BODY_BYTES       Max accepted body size for /api/v1/auth/login.
+#   RL_GLOBAL_MAX_BODY_BYTES      Max accepted body size for other endpoints.
+#   RL_TRUST_FORWARDED_FOR        "true" (default) to honour X-Forwarded-For.
+# --------------------------------------------------------------------------
+
 # Start the server
 USER 65532:65532
 CMD ["/app/idtx-core"]

@@ -20,6 +20,7 @@
 
 #include <idtx/utils/Logger.h>
 #include "middleware/JwtAuthHandler.h"
+#include "middleware/RateLimitHandler.h"
 #include "routes/RouteRegistry.h"
 
 namespace idtx
@@ -37,7 +38,12 @@ namespace core
     {
         IDTX_LOG_CATEGORY("Server");
         
-        using CrowApp = crow::App<crow::CORSHandler, middleware::JwtAuthHandler>;
+        // Middleware order matters: Crow runs before_handle in declaration
+        // order. RateLimitHandler is first so abusive/oversized traffic is
+        // shed before CORS and JWT processing spend any work on it.
+        using CrowApp = crow::App<middleware::RateLimitHandler,
+                                  crow::CORSHandler,
+                                  middleware::JwtAuthHandler>;
     
     public:
         /**
