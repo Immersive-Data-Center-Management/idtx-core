@@ -77,7 +77,7 @@ namespace middleware
 
             /// Maximum accepted request body size for the login endpoint (bytes).
             std::size_t          loginMaxBodyBytes  = 4 * 1024;   // 4 KiB
-            /// Maximum accepted request body size forthe upload endpoint (bytes).
+            /// Maximum accepted request body size for the upload endpoint (bytes).
             std::size_t          uploadMaxBodyBytes = 8 * 1024 * 1024 * 1024; // 8 GiB, as USD assets can get quite huge
             /// Maximum accepted request body size for any other endpoint (bytes).
             std::size_t          globalMaxBodyBytes = 8 * 1024 * 1024; // 8 MiB
