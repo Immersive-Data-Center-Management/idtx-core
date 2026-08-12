@@ -9,7 +9,9 @@
 #include "dto/AuthDto.h"
 #include "dto/ErrorResponse.h"
 #include "dto/JsonDto.h"
+#include "middleware/RateLimitHandler.h"
 #include "utils/HttpClient.h"
+#include "utils/SecurityAuditLog.h"
 
 using json = nlohmann::json;
 
@@ -26,6 +28,13 @@ AuthController::AuthController(std::string tokenUrl,
 
 crow::response AuthController::Login(const crow::request& req)
 {
+    // Derive the client key up-front so every audit event and throttler
+    // interaction uses the same source identity as the rate-limiting
+    // middleware (proxy-aware when behind an ingress/LB).
+    const std::string clientIp =
+        idtx::middleware::RateLimitHandler::ResolveClientIp(req, m_trustForwardedFor_);
+    const std::string userAgent = req.get_header_value("User-Agent");
+
     // Server must be configured.
     if (m_tokenUrl_.empty() || m_clientId_.empty())
     {
@@ -45,6 +54,10 @@ crow::response AuthController::Login(const crow::request& req)
 
     if (creds.username.empty() || creds.password.empty())
     {
+        idtx::security::SecurityAuditLog::Record({
+            idtx::security::AuditEvent::LoginFailed, clientIp, "POST",
+            "/api/v1/auth/login", userAgent, std::nullopt, 400,
+            "missing username or password", std::nullopt, std::nullopt});
         return idtx::dto::make_error(400, "invalid_request",
                                      "'username' and 'password' must not be empty.");
     }
@@ -83,10 +96,49 @@ crow::response AuthController::Login(const crow::request& req)
     {
         IDTX_LOG(IDTX_ERROR, "Token request failed: HTTP {} {}", response.code, response.err);
 
+        // Surface the IdP's own error response to aid diagnosis (e.g.
+        // "invalid_client", "invalid_grant", "unauthorized_client"). The OAuth2
+        // error body is safe to log: per RFC 6749 it carries only error codes /
+        // human-readable descriptions and never the submitted credentials or
+        // client secret. We still guard against an unexpectedly large body so a
+        // misbehaving IdP cannot flood the logs.
+        if (!response.body.empty())
+        {
+            constexpr std::size_t kMaxIdpBodyLog = 2048;
+            const std::string_view body{response.body};
+            IDTX_LOG(IDTX_INFO, "IdP error response (HTTP {}): {}{}",
+                     response.code,
+                     body.substr(0, kMaxIdpBodyLog),
+                     body.size() > kMaxIdpBodyLog ? "...(truncated)" : "");
+        }
+
         // 4xx from the IdP is treated as an authentication failure; everything
         // else is reported as a bad gateway so the client can distinguish.
         if (response.code >= 400 && response.code < 500)
         {
+            // Feed the failure into the shared throttler. When this failure
+            // crosses the configured threshold the source becomes locked out
+            // and subsequent attempts are short-circuited by the middleware.
+            bool lockedOut = false;
+            if (m_loginThrottler_)
+            {
+                lockedOut = m_loginThrottler_->RecordFailure(clientIp);
+            }
+
+            idtx::security::SecurityAuditLog::Record({
+                idtx::security::AuditEvent::LoginFailed, clientIp, "POST",
+                "/api/v1/auth/login", userAgent, creds.username, 401,
+                "invalid credentials", std::nullopt, std::nullopt});
+
+            if (lockedOut)
+            {
+                idtx::security::SecurityAuditLog::Record({
+                    idtx::security::AuditEvent::LoginLockout, clientIp, "POST",
+                    "/api/v1/auth/login", userAgent, creds.username, 401,
+                    "source locked out after repeated failures",
+                    std::nullopt, std::nullopt});
+            }
+
             return idtx::dto::make_error(401, "invalid_credentials",
                                          "Authentication failed.");
         }
@@ -117,6 +169,13 @@ crow::response AuthController::Login(const crow::request& req)
         std::move(idp.refresh_token),
         std::move(idp.scope)
     };
+
+    // Successful authentication clears any accumulated failure streak / lockout
+    // for this source so a legitimate user is not penalised after recovering.
+    if (m_loginThrottler_)
+    {
+        m_loginThrottler_->RecordSuccess(clientIp);
+    }
 
     crow::response res(200, json(out).dump());
     res.set_header("Content-Type", "application/json");
