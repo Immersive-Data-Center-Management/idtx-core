@@ -32,7 +32,7 @@ jobs:
         id: image-tag
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302
         with:
-          images: ${{ env.REGISTRY }}/service/idtx-core
+          images: service/idtx-core
           tags: |
             type=sha,event=pr
             type=edge,,event=branch,branch=main
@@ -41,48 +41,38 @@ jobs:
             org.opencontainers.image.description=Immersive Digital Twin Experience: Multi-User Backend
             org.opencontainers.image.vendor=SAP
       
-      - name: Log in to registry
-        if: ${{ env.REGISTRY != '' }}
-        uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ env.REGISTRY_USERNAME }}
-          password: ${{ env.REGISTRY_PASSWORD }}
-
       - name: Show runner disk usage (diagnostic)
-        if: ${{ env.REGISTRY != '' }}
         run: |
           echo "Disk usage:" && df -h || true
           echo "Runner cached dir size:" && du -sh /home/runner/actions-runner/cached || true
 
-      - name: Build and push (PRs — no cache export)
-        if: ${{ env.REGISTRY != '' && github.event_name == 'pull_request' }}
+      - name: Build (PRs — no cache export)
+        if: ${{ github.event_name == 'pull_request' }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         env:
           BUILDKIT_PROGRESS: plain
         with:
           context: .
           file: ./Dockerfile
-          push: true
+          push: false
           tags: ${{ steps.image-tag.outputs.tags }}
           labels: ${{ steps.image-tag.outputs.labels }}
 
-      - name: Build and push (main — use registry cache)
-        if: ${{ env.REGISTRY != '' && github.event_name != 'pull_request' }}
+      - name: Build (main — use registry cache)
+        if: ${{ github.event_name != 'pull_request' }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         env:
           BUILDKIT_PROGRESS: plain
         with:
           context: .
           file: ./Dockerfile
-          push: true
+          push: false
           tags: ${{ steps.image-tag.outputs.tags }}
           labels: ${{ steps.image-tag.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/service/idtx-core:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/service/idtx-core:buildcache,mode=min
+          cache-from: type=registry,ref=service/idtx-core:buildcache
+          cache-to: type=registry,ref=service/idtx-core:buildcache,mode=min
 
-      - name: Cleanup runner disk
-        if: ${{ env.REGISTRY != '' }}
+      - name: Cleanup runner disk        
         run: |
           echo "Pruning builder and system to free disk space" || true
           docker builder prune -af || true
