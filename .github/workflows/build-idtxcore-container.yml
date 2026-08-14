@@ -69,8 +69,8 @@ jobs:
           push: false
           tags: ${{ steps.image-tag.outputs.tags }}
           labels: ${{ steps.image-tag.outputs.labels }}
-          cache-from: type=registry,ref=service/idtx-core:buildcache
-          cache-to: type=registry,ref=service/idtx-core:buildcache,mode=min
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
 
       - name: Cleanup runner disk        
         run: |
