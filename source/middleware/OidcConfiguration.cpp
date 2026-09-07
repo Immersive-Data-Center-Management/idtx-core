@@ -43,7 +43,8 @@ idtx::middleware::OidcConfiguration idtx::middleware::OidcConfiguration::create(
                                                                                 const std::string& audiencesVar)
 {
     OidcConfiguration oidcData;
-    oidcData.enabled = true;
+    const auto auth_enabled = EnvironmentUtils::get_env("IDTX_OIDC_ENABLED").value_or("true");
+    oidcData.enabled = auth_enabled != "false" && auth_enabled != "0";
 
     if (oidcData.enabled)
     {
