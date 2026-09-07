@@ -76,11 +76,11 @@ namespace middleware
             std::chrono::seconds loginLockout       = std::chrono::seconds(300);
 
             /// Maximum accepted request body size for the login endpoint (bytes).
-            std::size_t          loginMaxBodyBytes  = 4 * 1024;   // 4 KiB
+            std::size_t          loginMaxBodyBytes  = 4ULL * 1024;   // 4 KiB
             /// Maximum accepted request body size for the upload endpoint (bytes).
-            std::size_t          uploadMaxBodyBytes = 8 * 1024 * 1024 * 1024; // 8 GiB, as USD assets can get quite huge
+            std::size_t          uploadMaxBodyBytes = 8ULL * 1024 * 1024 * 1024; // 8 GiB, as USD assets can get quite huge
             /// Maximum accepted request body size for any other endpoint (bytes).
-            std::size_t          globalMaxBodyBytes = 8 * 1024 * 1024; // 8 MiB
+            std::size_t          globalMaxBodyBytes = 8ULL * 1024 * 1024; // 8 MiB
 
             /// Trust X-Forwarded-For for client-IP resolution (true behind LB/ingress).
             bool                 trustForwardedFor  = true;
