@@ -200,6 +200,10 @@ ENV MESA_GLSL_VERSION_OVERRIDE=450
 # Set environment for default upload path
 ENV IDTX_UPLOADS_ROOT=/app/uploads
 
+# Set environment for default session clean-up time (1 minute),
+# after last client disconnected
+ENV IDTX_SESSION_IDLE_TIMEOUT_SECONDS=60
+
 # --- Security / anti-abuse safety net (in-process rate limiting) ---------
 # These are a per-replica safety net that complements the primary throttling
 # expected at the Kubernetes ingress / cloud load balancer. All values are
