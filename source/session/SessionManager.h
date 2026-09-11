@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -85,7 +86,8 @@ public:
     std::shared_ptr<Session> Create(const std::string& usd_file,
                                     idtx::dto::SessionMode mode,
                                     std::string& out_error,
-                                    CreateStatus& out_status);
+                                    CreateStatus& out_status,
+                                    bool auto_commit = false);
 
     std::shared_ptr<Session> Get(const std::string& id) const;
     std::vector<std::shared_ptr<Session>> List() const;
@@ -185,6 +187,37 @@ public:
                                     const std::string& prim_path,
                                     crow::websocket::connection* origin);
 
+    /**
+     * @brief Push the current server-side stage state to a single freshly
+     *        joined connection so a late joiner is not left with a stale
+     *        REST-fetched file. Iterates the prims with authored opinions in
+     *        the session (sidecar) layer, unicasts one @c kXformBroadcast per
+     *        prim to @p conn, then a terminal @c kSnapshotComplete frame.
+     *        Safe to call after AttachClient; takes the session's stage_mutex
+     *        briefly for the resolved-transform reads.
+     */
+    void SendJoinSnapshot(const std::shared_ptr<Session>& session,
+                          crow::websocket::connection* conn);
+
+    /**
+     * @brief Outcome of a commit request.
+     */
+    enum class CommitStatus
+    {
+        Ok,
+        UnknownSession,
+        NothingToCommit,
+        WriteFailed
+    };
+
+    /**
+     * @brief Merge the session's sidecar overrides back into the original USD
+     *        file (preserving composition arcs via UsdUtilsFlattenLayerStack),
+     *        then reload other live sessions bound to the same file. Does not
+     *        destroy the session. Safe to call from the REST thread.
+     */
+    CommitStatus CommitSession(const std::string& session_id, std::string& out_error);
+
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
@@ -203,6 +236,16 @@ public:
      */
     std::size_t ReapIdleSessions();
 
+    /**
+     * @brief Save the session (sidecar) layer of every session currently
+     *        flagged dirty, clearing the flag on success. Each save is done
+     *        under the session's stage_mutex so it never races client-driven
+     *        authoring. Driven by the background SessionFlusher; exposed so
+     *        tests can trigger a flush deterministically. Returns the number of
+     *        sessions actually saved.
+     */
+    std::size_t FlushDirtySessions();
+
 private:
     void DestroyLocked(const std::string& id);
 
@@ -218,6 +261,7 @@ private:
     void ReaperRun();
 
     idtx::utils::UsdFileLocator                                m_locator_;
+    std::filesystem::path                                     m_sessions_dir_;
     mutable std::shared_mutex                                  m_mutex_;
     std::unordered_map<std::string, std::shared_ptr<Session>>  m_sessions_;
 

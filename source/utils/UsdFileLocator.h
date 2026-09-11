@@ -50,11 +50,14 @@ public:
         PermissionDenied
     };
 
-    explicit UsdFileLocator(std::string uploads_root = "uploads")
+    explicit UsdFileLocator(std::string uploads_root = "uploads", std::string sessions_root = "sessions")
         : m_root_(std::move(uploads_root))
+        , m_session_root_(std::move(sessions_root))
     {}
 
     const std::string& GetRoot() const noexcept { return m_root_; }
+
+    const std::string& GetSessionRoot() const noexcept { return m_session_root_; }
 
     /**
      * @brief Validate purely syntactic aspects of a (possibly URL-encoded) path.
@@ -435,6 +438,7 @@ private:
     }
 
     std::string m_root_;
+    std::string m_session_root_;
 };
 
 } // namespace utils

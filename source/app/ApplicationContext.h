@@ -28,6 +28,7 @@
 #include "controller/SessionController.h"
 #include "controller/WebSocketController.h"
 #include "session/SessionManager.h"
+#include "session/SessionFlusher.h"
 #include "thumbnails/PlaceholderThumbnailGenerator.h"
 #if defined(IDTX_ENABLE_IMAGING)
 #include "thumbnails/UsdImagingThumbnailGenerator.h"
@@ -53,6 +54,7 @@ struct ApplicationContext
     std::shared_ptr<AuthController>                    authController;
     std::shared_ptr<FileServingController>             fileServingController;
     std::shared_ptr<idtx::session::SessionManager>     sessionManager;
+    std::shared_ptr<idtx::session::SessionFlusher>     sessionFlusher;
     std::shared_ptr<SessionController>                 sessionController;
     std::shared_ptr<WebSocketController>               webSocketController;
 
@@ -89,9 +91,12 @@ struct ApplicationContext
         //
         // The uploads root is configurable via IDTX_UPLOADS_ROOT.
         const std::string uploads_root =
-            EnvironmentUtils::get_env("IDTX_UPLOADS_ROOT").value_or("/app/uploads");
+            EnvironmentUtils::get_env("IDTX_UPLOADS_ROOT").value_or("./uploads");
+        // The session root folder is configurable via IDTX_SESSIONS_ROOT
+        const std::string session_root =
+            EnvironmentUtils::get_env("IDTX_SESSIONS_ROOT").value_or("./sessions");
         ctx.usdFileLocator        =
-            std::make_shared<idtx::utils::UsdFileLocator>(uploads_root);
+            std::make_shared<idtx::utils::UsdFileLocator>(uploads_root, session_root);
 
         // Fail fast: make sure the uploads root exists and is writable by this
         // process *now*, at startup, rather than surfacing an opaque
@@ -179,6 +184,16 @@ struct ApplicationContext
         ctx.sessionManager        = std::make_shared<idtx::session::SessionManager>(
                                         *ctx.usdFileLocator,
                                         std::chrono::seconds{idle_secs});
+
+        // Background worker that persists dirty session layers to their
+        // sidecar files on a fixed interval (default 2 s). Configurable via
+        // IDTX_SESSION_FLUSH_INTERVAL_MS. Declared after the manager so it is
+        // torn down (and does its final flush) before the manager is destroyed.
+        const auto flush_ms =
+            EnvironmentUtils::get_env_u64("IDTX_SESSION_FLUSH_INTERVAL_MS", 2000);
+        ctx.sessionFlusher        = std::make_shared<idtx::session::SessionFlusher>(
+                                        ctx.sessionManager,
+                                        std::chrono::milliseconds{flush_ms});
 
         ctx.fileServingController = std::make_shared<FileServingController>(
                                         ctx.usdFileLocator,
