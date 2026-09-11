@@ -199,7 +199,7 @@ ENV MESA_GLSL_VERSION_OVERRIDE=450
 
 # Set environment for default upload path
 ENV IDTX_UPLOADS_ROOT=/app/uploads
-
+ENV IDTX_SESSIONS_ROOT=/app/sessions
 # Set environment for default session clean-up time (1 minute),
 # after last client disconnected
 ENV IDTX_SESSION_IDLE_TIMEOUT_SECONDS=60
