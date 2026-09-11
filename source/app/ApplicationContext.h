@@ -29,6 +29,9 @@
 #include "controller/WebSocketController.h"
 #include "session/SessionManager.h"
 #include "thumbnails/PlaceholderThumbnailGenerator.h"
+#if defined(IDTX_ENABLE_IMAGING)
+#include "thumbnails/UsdImagingThumbnailGenerator.h"
+#endif
 #include "thumbnails/ThumbnailWorker.h"
 #include "utils/Environment.h"
 #include "utils/UsdFileLocator.h"
@@ -66,6 +69,9 @@ struct ApplicationContext
      *   - @c IDTX_THUMBNAIL_ENABLED  (default: "true")
      *   - @c IDTX_THUMBNAIL_SIZE     (default: 256)
      *   - @c IDTX_SESSION_IDLE_TIMEOUT_SECONDS (default: 300; 0 disables the reaper)
+     *   - @c IDTX_THUMBNAIL_RENDER   (default: "real" when built with imaging;
+     *     set to "placeholder" to force the metadata-only generator. Ignored
+     *     unless the binary was built with @c IDTX_ENABLE_IMAGING.)
      *   - @c OAUTH_TOKEN_URL, @c OAUTH_CLIENT_ID,
      *     @c OAUTH_CLIENT_SECRET, @c OAUTH_SCOPE
      *
@@ -106,9 +112,11 @@ struct ApplicationContext
         }
 
         // Thumbnail generation is opt-out via IDTX_THUMBNAIL_ENABLED=false.
-        // The placeholder generator is safe to run in the current container
-        // (no imaging deps required); it can later be swapped for a Hydra-
-        // based implementation without touching the controller.
+        // When the binary is built with imaging (IDTX_ENABLE_IMAGING), the
+        // Hydra-based UsdImagingThumbnailGenerator renders a real preview of
+        // the stage (it internally falls back to the placeholder on any render
+        // failure). Otherwise, or when IDTX_THUMBNAIL_RENDER=placeholder, the
+        // metadata-only placeholder generator is used.
         const auto thumb_enabled =
             EnvironmentUtils::get_env("IDTX_THUMBNAIL_ENABLED").value_or("true");
         if (thumb_enabled != "false" && thumb_enabled != "0")
@@ -119,8 +127,25 @@ struct ApplicationContext
                 try { size = static_cast<std::uint32_t>(std::stoul(*s)); }
                 catch (...) { /* keep default */ }
             }
-            auto generator =
+
+            std::shared_ptr<idtx::thumbnails::ThumbnailGenerator> generator;
+#if defined(IDTX_ENABLE_IMAGING)
+            const auto render_mode =
+                EnvironmentUtils::get_env("IDTX_THUMBNAIL_RENDER").value_or("real");
+            if (render_mode == "placeholder")
+            {
+                generator =
+                    std::make_shared<idtx::thumbnails::PlaceholderThumbnailGenerator>(size);
+            }
+            else
+            {
+                generator =
+                    std::make_shared<idtx::thumbnails::UsdImagingThumbnailGenerator>(size);
+            }
+#else
+            generator =
                 std::make_shared<idtx::thumbnails::PlaceholderThumbnailGenerator>(size);
+#endif
             ctx.thumbnailWorker =
                 std::make_shared<idtx::thumbnails::ThumbnailWorker>(generator);
         }

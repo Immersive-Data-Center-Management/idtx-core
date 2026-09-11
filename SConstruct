@@ -5,6 +5,7 @@ import glob
 import shutil
 
 from SCons.Script import ARGUMENTS
+from SCons.Script import Exit
 
 # USD Version and path configuration
 openusd_version = "26.08"
@@ -22,6 +23,28 @@ if custom:
 
 usd_root = f"{shared_thirdparty_root}/openusd-{openusd_version}"
 usd_src = f"{shared_thirdparty_root}/openusd-{openusd_version}-src"
+
+# To Help container builds to cache specific steps of the expensive build we allow
+# to trigger only specific parts of it, via arguments. However, calling them individuall
+# should follow the same order as given in this script
+# running the script without any of them will detect whether all prerequisits are met and
+# provide them if not found anyway.
+#   scons vcpkg_only=1      -> Downlaoad and install VCPKG and all dependencies only
+#   scons openusd_only=1    ->
+BUILD_OPENUSD_ONLY = ARGUMENTS.get('openusd_only', '0') != '0'
+INSTALL_VCPKG_ONLY = ARGUMENTS.get('vcpkg_only', '0') != '0'
+
+# Imaging (Hydra) thumbnail rendering is an opt-in build variant:
+#   scons imaging=1            -> build OpenUSD with Hydra, compile the real
+#                                 UsdImagingThumbnailGenerator (software OpenGL).
+#   scons imaging=1 osmesa=1   -> additionally use an explicit OSMesa off-screen
+#                                 context instead of the EGL surfaceless path.
+# The imaging OpenUSD build installs to a separate directory (-imaging suffix,
+# see scons/openusd.py) so it never clobbers the slim default build.
+IMAGING_ENABLED = ARGUMENTS.get('imaging', '0') != '0'
+OSMESA_ENABLED = ARGUMENTS.get('osmesa', '0') != '0'
+if IMAGING_ENABLED:
+    usd_root = f"{usd_root}-imaging"
 
 def find_absl_libs(lib_dir, extension):
     libs = []
@@ -48,9 +71,13 @@ def _get_libs_to_install(platform_name):
         ]
     else:
         usd_libs = [
-            f"{usd_root}/lib/libusd_ms.so"            
+            f"{usd_root}/lib/libusd_ms.so"
         ]
-    
+        # OpenSubdiv is built as separate shared objects by OpenUSD's build_usd.py
+        # (not compiled into the monolithic libusd_ms.so). Pick them up with a glob
+        # so they are installed alongside the binary and found via LD_LIBRARY_PATH.
+        usd_libs += glob.glob(f"{usd_root}/lib/libosd*.so*")
+
     if platform_name == "windows":
         libs_to_install = usd_libs + [
             f"./thirdparty/vcpkg_installed/x64-windows/bin/abseil_dll.dll",
@@ -83,9 +110,13 @@ env = Environment(
     OPENUSD_SRC_PATH=usd_src
 )
 
-env.InstallVcpkg()
-env.InstallDependencies()
-env.CompileProtobuffer()
+if not BUILD_OPENUSD_ONLY:
+    env.InstallVcpkg()
+    env.InstallDependencies()    
+    if INSTALL_VCPKG_ONLY:
+        print("Only VCPKG installation was requested. Finishing here.")
+        Exit(0)
+    
 
 if platform.system() == "Windows":
     env["PLATFORM"] = "windows"
@@ -97,12 +128,8 @@ else:
 env['platform_name'] = env["PLATFORM"]
 env['arch'] = ARGUMENTS.get('arch', 'arm64')
 env['target'] = ARGUMENTS.get('target', 'debug')
-
-platform_name = env["platform_name"]
 build_target = env["target"]
-build_arch = env["arch"]
-vcpkg_triplet = env['VCPKG_TRIPLET']
-print(f"Using vcpkg triplet: {vcpkg_triplet}")
+
 
 # generic build flags
 if platform.system() == "Windows" and (env["CXX"] == "cl" or env["CC"] == "cl"):
@@ -116,7 +143,19 @@ else:
     if platform.system() == "Darwin":  # Only add -arch on macOS
         env.Append(CCFLAGS=['-arch', env['arch']])
 
-env.BuildOpenUSD()
+env.BuildOpenUSD(imaging=IMAGING_ENABLED)
+
+if BUILD_OPENUSD_ONLY:
+    print("Only OpenUSD installatio was requested. Finishing here")
+    Exit(0)
+
+env.CompileProtobuffer()
+
+platform_name = env["platform_name"]
+
+build_arch = env["arch"]
+vcpkg_triplet = env['VCPKG_TRIPLET']
+print(f"Using vcpkg triplet: {vcpkg_triplet}")
 
 env.Append(CPPPATH=[
         f"{usd_root}/include",
@@ -159,6 +198,20 @@ elif platform.system() == 'Windows':
     libs.extend(['ws2_32', 'wsock32'])
 elif platform.system() == 'Linux':
     libs.extend(['crypto', 'ssl', 'z'])
+
+# Imaging build links against the system software-GL stack. The monolithic
+# usd_ms already contains the USD imaging libraries (hd, hdSt, hdx, glf, garch,
+# hgiGL, hio, usdImaging, usdImagingGL, usdAppUtils), so only the platform GL
+# libraries need to be added here.
+if IMAGING_ENABLED:
+    if platform.system() == 'Linux':
+        libs.extend(['GL', 'EGL'])
+        # OSMesa is loaded at runtime via dlopen — no direct linkage needed.
+    elif platform.system() == 'Windows':
+        libs.extend(['opengl32'])
+        if OSMESA_ENABLED:
+            libs.extend(['osmesa'])
+    # macOS links OpenGL via the -framework flag added with the CPPDEFINES below.
 
 env.Append(LIBPATH=[
     f"{usd_root}/lib",
@@ -237,6 +290,14 @@ elif platform_name == "macos":
         env.Append(CPPPATH=[os.path.join(openssl11, 'include')])
 
 env.Append(CPPDEFINES=["CROW_ENABLE_WEBSOCKET"])
+
+# Compile-time switches for the Hydra thumbnail generator.
+if IMAGING_ENABLED:
+    env.Append(CPPDEFINES=["IDTX_ENABLE_IMAGING"])
+    if OSMESA_ENABLED:
+        env.Append(CPPDEFINES=["IDTX_USE_OSMESA"])
+    if platform.system() == 'Darwin':
+        env.Append(LINKFLAGS=["-framework", "OpenGL"])
 
 sources = list(set(env.Glob("source/*.cpp") + env.Glob("source/**/*.cpp") + env.Glob(f"./shared/build/proto/*.pb.cc")))
 

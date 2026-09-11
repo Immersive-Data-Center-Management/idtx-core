@@ -30,6 +30,9 @@ public:
         bool thumbnails_enabled = true;      // IDTX_THUMBNAIL_ENABLED
         std::uint32_t thumbnail_size = 64;   // IDTX_THUMBNAIL_SIZE (small = fast in tests)
         bool write_cube_usda      = true;    // create uploads/cube.usda automatically
+        // IDTX_SESSION_IDLE_TIMEOUT_SECONDS. 0 (default) disables the idle
+        // reaper so most tests keep sessions until an explicit DELETE.
+        std::uint32_t idle_timeout_seconds = 0;
     };
 
     static Options WithThumbnails();
