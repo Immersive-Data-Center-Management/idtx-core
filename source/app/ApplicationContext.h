@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -64,6 +65,7 @@ struct ApplicationContext
      * Environment variables consulted:
      *   - @c IDTX_THUMBNAIL_ENABLED  (default: "true")
      *   - @c IDTX_THUMBNAIL_SIZE     (default: 256)
+     *   - @c IDTX_SESSION_IDLE_TIMEOUT_SECONDS (default: 300; 0 disables the reaper)
      *   - @c OAUTH_TOKEN_URL, @c OAUTH_CLIENT_ID,
      *     @c OAUTH_CLIENT_SECRET, @c OAUTH_SCOPE
      *
@@ -142,8 +144,16 @@ struct ApplicationContext
         // wired up with a link back to the manager: an upload that replaces
         // an existing USD file will then trigger a root-layer reload on
         // every live session bound to that file.
+        //
+        // A background reaper destroys any session that has had zero connected
+        // clients for IDTX_SESSION_IDLE_TIMEOUT_SECONDS (default 300s). Set the
+        // variable to 0 to disable the reaper and keep sessions until an
+        // explicit DELETE.
+        const auto idle_secs =
+            EnvironmentUtils::get_env_u64("IDTX_SESSION_IDLE_TIMEOUT_SECONDS", 300);
         ctx.sessionManager        = std::make_shared<idtx::session::SessionManager>(
-                                        *ctx.usdFileLocator);
+                                        *ctx.usdFileLocator,
+                                        std::chrono::seconds{idle_secs});
 
         ctx.fileServingController = std::make_shared<FileServingController>(
                                         ctx.usdFileLocator,

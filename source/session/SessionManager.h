@@ -13,9 +13,14 @@
  */
 #pragma once
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -50,7 +55,17 @@ public:
         StageOpenFailed     // path is fine, but UsdStage::Open returned null
     };
 
-    explicit SessionManager(idtx::utils::UsdFileLocator file_locator);
+    /**
+     * @brief Construct a session manager.
+     *
+     * @param file_locator  Resolves request-supplied paths to on-disk USD files.
+     * @param idle_timeout  How long a session may have zero connected clients
+     *        before the background reaper destroys it. A value of 0 (the
+     *        default) disables the reaper entirely, so sessions persist until an
+     *        explicit Destroy() or manager shutdown.
+     */
+    explicit SessionManager(idtx::utils::UsdFileLocator file_locator,
+                            std::chrono::seconds idle_timeout = std::chrono::seconds{0});
     ~SessionManager();
 
     SessionManager(const SessionManager&)            = delete;
@@ -179,12 +194,41 @@ public:
 
     const idtx::utils::UsdFileLocator& GetLocator() const noexcept { return m_locator_; }
 
+    /**
+     * @brief Destroy every session that has had zero connected clients for at
+     *        least the configured idle timeout, and return how many were
+     *        reaped. Normally driven by the background reaper thread; exposed
+     *        so tests can trigger a sweep deterministically without waiting.
+     *        A no-op that returns 0 when the idle timeout is disabled (0).
+     */
+    std::size_t ReapIdleSessions();
+
 private:
     void DestroyLocked(const std::string& id);
+
+    /// Revoke @p session's listener and clear its stage's session layer, the
+    /// shared "safe teardown" step used before dropping the last reference.
+    /// Mirrors the ~SessionManager teardown to avoid racing the thumbnail
+    /// worker's SdfLayer::FindOrOpen on the same on-disk path. Does not take
+    /// m_mutex_ itself.
+    static void TeardownSession(const std::shared_ptr<Session>& session);
+
+    /// Background reaper loop: periodically calls ReapIdleSessions() until the
+    /// manager is destroyed. Only started when m_idle_timeout_ > 0.
+    void ReaperRun();
 
     idtx::utils::UsdFileLocator                                m_locator_;
     mutable std::shared_mutex                                  m_mutex_;
     std::unordered_map<std::string, std::shared_ptr<Session>>  m_sessions_;
+
+    // Idle-session reaper. m_idle_timeout_ == 0 disables it and leaves the
+    // thread unstarted. m_reaper_mutex_/m_reaper_cv_ drive the sleep/wake of
+    // the loop; m_reaper_stop_ signals shutdown from the destructor.
+    std::chrono::seconds                                       m_idle_timeout_{0};
+    std::atomic<bool>                                          m_reaper_stop_{false};
+    std::mutex                                                 m_reaper_mutex_;
+    std::condition_variable                                    m_reaper_cv_;
+    std::thread                                                m_reaper_thread_;
 };
 
 } // namespace session

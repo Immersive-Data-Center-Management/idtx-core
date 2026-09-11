@@ -17,6 +17,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <unordered_set>
@@ -57,6 +58,13 @@ struct Session
     // lock; attach/detach take exclusive.
     mutable std::shared_mutex                         clients_mutex;
     std::unordered_set<crow::websocket::connection*>  clients;
+
+    // Set to steady_clock::now() when the client set becomes empty (and at
+    // creation, since a new session starts with no clients); reset whenever a
+    // client attaches. Read by the SessionManager idle reaper to decide when a
+    // session has been unused long enough to destroy. Guarded by clients_mutex.
+    std::optional<std::chrono::steady_clock::time_point> empty_since =
+        std::chrono::steady_clock::now();
 
     // The connection that last initiated a stage authoring action. This is
     // set under stage_mutex by SessionManager::ApplyTransformUpdate so that

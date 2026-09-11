@@ -1,8 +1,10 @@
 #include "SessionManager.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <utility>
+#include <vector>
 
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/prim.h>
@@ -28,12 +30,31 @@ namespace idtx
 namespace session
 {
 
-SessionManager::SessionManager(idtx::utils::UsdFileLocator file_locator)
+SessionManager::SessionManager(idtx::utils::UsdFileLocator file_locator,
+                               std::chrono::seconds idle_timeout)
     : m_locator_(std::move(file_locator))
-{}
+    , m_idle_timeout_(idle_timeout)
+{
+    if (m_idle_timeout_ > std::chrono::seconds{0})
+    {
+        m_reaper_thread_ = std::thread(&SessionManager::ReaperRun, this);
+        IDTX_LOG(IDTX_INFO,
+                 "Idle-session reaper enabled (timeout {}s).",
+                 static_cast<long long>(m_idle_timeout_.count()));
+    }
+}
 
 SessionManager::~SessionManager()
 {
+    // Stop the reaper thread before touching m_sessions_ so it cannot race the
+    // teardown below. Mirrors the ThumbnailWorker shutdown handshake.
+    {
+        std::lock_guard<std::mutex> lk(m_reaper_mutex_);
+        m_reaper_stop_ = true;
+    }
+    m_reaper_cv_.notify_all();
+    if (m_reaper_thread_.joinable()) m_reaper_thread_.join();
+
     // Deterministic teardown:
     //   1. Revoke every StageNoticeListener first, so no notice can fire
     //      against a half-destroyed Session while we're clearing state.
@@ -49,33 +70,39 @@ SessionManager::~SessionManager()
     std::unique_lock lk(m_mutex_);
     for (auto& [id, session] : m_sessions_)
     {
-        if (!session) continue;
-        if (session->listener) session->listener->Revoke();
-
-        if (session->stage)
-        {
-            try
-            {
-                if (auto session_layer = session->stage->GetSessionLayer())
-                {
-                    session_layer->Clear();
-                }
-            }
-            catch (const std::exception& e)
-            {
-                IDTX_LOG(IDTX_WARN,
-                         "SessionManager dtor: failed to clear session layer for {}: {}",
-                         id, e.what());
-            }
-            catch (...)
-            {
-                IDTX_LOG(IDTX_WARN,
-                         "SessionManager dtor: failed to clear session layer for {} (unknown exception).",
-                         id);
-            }
-        }
+        (void)id;
+        TeardownSession(session);
     }
     m_sessions_.clear();
+}
+
+void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
+{
+    if (!session) return;
+    if (session->listener) session->listener->Revoke();
+
+    if (session->stage)
+    {
+        try
+        {
+            if (auto session_layer = session->stage->GetSessionLayer())
+            {
+                session_layer->Clear();
+            }
+        }
+        catch (const std::exception& e)
+        {
+            IDTX_LOG(IDTX_WARN,
+                     "TeardownSession: failed to clear session layer for {}: {}",
+                     session->id, e.what());
+        }
+        catch (...)
+        {
+            IDTX_LOG(IDTX_WARN,
+                     "TeardownSession: failed to clear session layer for {} (unknown exception).",
+                     session->id);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +312,7 @@ SessionManager::AttachStatus SessionManager::AttachClient(
         return AttachStatus::SingleEditBusy;
     }
     session->clients.insert(conn);
+    session->empty_since.reset();
     IDTX_LOG(IDTX_INFO, "Client attached to session {} (now {} clients).",
              session_id, session->clients.size());
     return AttachStatus::Ok;
@@ -306,6 +334,8 @@ void SessionManager::DetachClient(const std::string& session_id,
     if (!session) return;
     std::unique_lock lk(session->clients_mutex);
     session->clients.erase(conn);
+    if (session->clients.empty())
+        session->empty_since = std::chrono::steady_clock::now();
     IDTX_LOG(IDTX_INFO, "Client detached from session {} (now {} clients).",
              session_id, session->clients.size());
 }
@@ -480,6 +510,94 @@ void SessionManager::DestroyLocked(const std::string& id)
     if (it == m_sessions_.end()) return;
     if (it->second && it->second->listener) it->second->listener->Revoke();
     m_sessions_.erase(it);
+}
+
+// ---------------------------------------------------------------------------
+// Idle-session reaper
+// ---------------------------------------------------------------------------
+
+std::size_t SessionManager::ReapIdleSessions()
+{
+    if (m_idle_timeout_ <= std::chrono::seconds{0}) return 0;
+
+    const auto now = std::chrono::steady_clock::now();
+
+    // Collect the reaped sessions so their teardown (and the drop of the last
+    // shared_ptr) happens *after* we release m_mutex_, keeping the map lock
+    // hold short and away from USD teardown work.
+    std::vector<std::shared_ptr<Session>> reaped;
+    {
+        std::unique_lock lk(m_mutex_);
+        for (auto it = m_sessions_.begin(); it != m_sessions_.end(); )
+        {
+            const auto& session = it->second;
+            bool idle = false;
+            if (session)
+            {
+                // Holding m_mutex_ exclusively means no AttachClient/DetachClient
+                // can pass Get() (which needs a shared lock on m_mutex_), so the
+                // emptiness reading below is stable through the erase — no
+                // check-then-act race with a client reconnecting.
+                std::shared_lock clk(session->clients_mutex);
+                idle = session->clients.empty()
+                       && session->empty_since
+                       && (now - *session->empty_since) >= m_idle_timeout_;
+            }
+
+            if (idle)
+            {
+                IDTX_LOG(IDTX_INFO,
+                         "Reaping idle session {} (no clients for >= {}s).",
+                         it->first,
+                         static_cast<long long>(m_idle_timeout_.count()));
+                reaped.push_back(session);
+                it = m_sessions_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
+    for (const auto& session : reaped)
+    {
+        TeardownSession(session);
+    }
+    return reaped.size();
+}
+
+void SessionManager::ReaperRun()
+{
+    // Sweep often enough that shutdown is prompt and the effective deletion
+    // delay stays close to the configured timeout, but never busy-loop.
+    const auto interval =
+        std::min<std::chrono::seconds>(m_idle_timeout_, std::chrono::seconds{30});
+    const auto sweep = std::max<std::chrono::seconds>(interval, std::chrono::seconds{1});
+
+    std::unique_lock<std::mutex> lk(m_reaper_mutex_);
+    while (!m_reaper_stop_)
+    {
+        m_reaper_cv_.wait_for(lk, sweep, [this] { return m_reaper_stop_.load(); });
+        if (m_reaper_stop_) break;
+
+        // Run the sweep without holding m_reaper_mutex_ so a concurrent
+        // shutdown can still signal us promptly.
+        lk.unlock();
+        try
+        {
+            ReapIdleSessions();
+        }
+        catch (const std::exception& e)
+        {
+            IDTX_LOG(IDTX_ERROR, "Idle-session reaper sweep threw: {}", e.what());
+        }
+        catch (...)
+        {
+            IDTX_LOG(IDTX_ERROR, "Idle-session reaper sweep threw unknown exception.");
+        }
+        lk.lock();
+    }
 }
 
 } // namespace session
