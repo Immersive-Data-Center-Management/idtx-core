@@ -2,12 +2,14 @@ import os
 import platform
 import subprocess
 import hashlib
+import json
 import shutil
 from SCons.Script import Exit
 
 def generate(env):
     env.AddMethod(_install_vcpkg, "InstallVcpkg")
     env.AddMethod(_install_deps, "InstallDependencies")
+    env.AddMethod(_get_vcpkg_env, "GetVcpkgEnv")
 
 def exists(env):
     return True
@@ -32,7 +34,7 @@ def _get_vcpkg_triplet():
     }
 
     arch = arch_map.get(machine, machine)
-    
+
     if system == "Windows":
         return "x64-windows"
     elif system == "Darwin":  # macOS
@@ -41,9 +43,31 @@ def _get_vcpkg_triplet():
         return f"{arch}-linux"
     return None
 
+def _get_vcpkg_baseline():
+    """
+    Read the pinned vcpkg commit from vcpkg.json's builtin-baseline.
+
+    The vcpkg tool is checked out at this commit so the tool version matches
+    the port versions the baseline resolves to. Without this pin the tool is
+    whatever is currently on vcpkg's default branch, which drifts over time
+    and breaks reproducible builds.
+    """
+    vcpkg_json_path = os.path.join(".", "vcpkg.json")
+    if not os.path.exists(vcpkg_json_path):
+        return None
+
+    try:
+        with open(vcpkg_json_path, "r") as f:
+            data = json.load(f)
+        return data.get("builtin-baseline")
+    except (ValueError, OSError) as e:
+        print(f"Warning: Could not read builtin-baseline from vcpkg.json: {e}")
+        return None
+
 def _install_vcpkg(env):
     vcpkg_path = f"./thirdparty/vcpkg"
     bootstrap_script = f"{vcpkg_path}/bootstrap-vcpkg.sh"
+    baseline = _get_vcpkg_baseline()
 
     if not os.path.exists(bootstrap_script):  # Check for a known file
         # Remove empty or incomplete directory before cloning
@@ -62,6 +86,21 @@ def _install_vcpkg(env):
             print(f"Failed to clone VCPKG repo.")
             Exit(f"Build aborted due to subprocess failure (exit code: {result.returncode})")
 
+        # Pin the vcpkg tool to the same commit as vcpkg.json's
+        # builtin-baseline so the tool version matches the resolved port
+        # versions. This keeps builds reproducible and avoids regressions
+        # from vcpkg's default branch.
+        if baseline:
+            print(f"Checking out pinned VCPKG baseline {baseline}")
+            result = subprocess.run([
+                "git", "-C", vcpkg_path, "checkout", "--quiet", baseline
+            ])
+            if result.returncode != 0:
+                print(f"Failed to checkout VCPKG baseline {baseline}.")
+                Exit(f"Build aborted due to subprocess failure (exit code: {result.returncode})")
+        else:
+            print("Warning: no builtin-baseline in vcpkg.json; using vcpkg default branch (not pinned).")
+
     if not os.path.exists(f"{vcpkg_path}/packages"):
         vcpkg_path_abs = os.path.abspath(vcpkg_path)
         if platform.system() == "Windows":
@@ -76,6 +115,10 @@ def _install_vcpkg(env):
             print(f"Failed to bootstrap VCPKG repo.")
             Exit(f"Build aborted due to subprocess failure (exit code: {result.returncode})")
 
+    vcpkg_tripplet = _get_vcpkg_triplet()
+    env['VCPKG_TRIPLET'] = vcpkg_tripplet
+
+def _get_vcpkg_env(env):
     vcpkg_tripplet = _get_vcpkg_triplet()
     env['VCPKG_TRIPLET'] = vcpkg_tripplet
 

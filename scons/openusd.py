@@ -21,7 +21,7 @@ def generate(env):
 def exists(env):
     return True
 
-def _build_open_usd(env, with_python_support=False):
+def _build_open_usd(env, with_python_support=False, imaging=False):
     print("USD ROOT: " + env.get("OPENUSD_PATH", "<UNKNONW>"))
     open_usd_version = env["OPENUSD_VERSION"]
     open_usd_path =  env["OPENUSD_PATH"]
@@ -48,7 +48,10 @@ def _build_open_usd(env, with_python_support=False):
     platform_name = env["platform_name"]
 
     # check if we have build the openUSD lib already
-    open_usd_build_path = open_usd_path if not with_python_support else f"{open_usd_path}-withPython"
+    if with_python_support:
+        open_usd_build_path = f"{open_usd_path}-withPython"
+    else:
+        open_usd_build_path = open_usd_path
     if platform_name == "windows":
         open_usd_lib = f"{open_usd_build_path}/lib/usd_ms.dll"
     elif platform_name == "macos":
@@ -79,7 +82,8 @@ def _build_open_usd(env, with_python_support=False):
             python_cmd = "python"
 
         print(f"Building openUSD without python support = {with_python_support}...")
-        result = subprocess.run([
+        print(f"Building openUSD with imaging support = {imaging}...")
+        build_args = [
             python_cmd,
             open_usd_build_script,
             open_usd_build_path,
@@ -93,12 +97,17 @@ def _build_open_usd(env, with_python_support=False):
             "--no-debug-python",
             "--no-openvdb",
             "--no-usdview",
-            "--no-imaging",
+            # --usd-imaging builds both the Hydra stack AND the USD→Hydra bridge
+            # (usdImaging, usdImagingGL, usdAppUtils incl. frameRecorder).
+            # --imaging alone only builds the Hydra stack (PXR_BUILD_USD_IMAGING=OFF)
+            # and omits the bridge layer, so frameRecorder.h is not installed.
+            "--usd-imaging" if imaging else "--no-imaging",
             "--no-vulkan",
             "--no-materialx",
             "--onetbb",
             "--cmake-build-args", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_CXX_STANDARD=17",
-        ], env=openusd_env)
+        ]
+        result = subprocess.run(build_args, env=openusd_env)
         
         if result.returncode != 0:
             print(f"Failed to build openUSD")
