@@ -106,6 +106,12 @@ void WebSocketController::OnOpen(crow::websocket::connection& conn)
         IDTX_LOG(IDTX_ERROR, "Failed to serialize Handshake for session {}.", session->id);
     }
 
+    // Late-joiner sync: push the current server-side stage state (all prims
+    // with authored session-layer overrides) followed by a SnapshotComplete
+    // marker, so a client joining after edits — or reconnecting after a drop /
+    // server restart — sees the live state rather than only the stale REST file.
+    m_manager_->SendJoinSnapshot(session, &conn);
+
     IDTX_LOG(IDTX_INFO, "WebSocket connection opened for session {} from {}.",
              session->id, conn.get_remote_ip());
 }
@@ -173,6 +179,7 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
         case idtxcore::BaseMessage::kXformBroadcast:
         case idtxcore::BaseMessage::kAck:
         case idtxcore::BaseMessage::kError:
+        case idtxcore::BaseMessage::kSnapshotComplete:
             // Server-originated message types; ignore if a client sends them.
             IDTX_LOG(IDTX_DEBUG, "Ignoring server-originated message type from client.");
             break;

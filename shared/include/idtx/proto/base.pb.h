@@ -20,6 +20,7 @@
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/arena.h"
 #include "google/protobuf/arenastring.h"
+#include "google/protobuf/generated_message_bases.h"
 #include "google/protobuf/generated_message_tctable_decl.h"
 #include "google/protobuf/generated_message_util.h"
 #include "google/protobuf/metadata_lite.h"
@@ -63,6 +64,10 @@ class Handshake;
 struct HandshakeDefaultTypeInternal;
 extern HandshakeDefaultTypeInternal _Handshake_default_instance_;
 extern const ::google::protobuf::internal::ClassDataFull Handshake_class_data_;
+class SnapshotComplete;
+struct SnapshotCompleteDefaultTypeInternal;
+extern SnapshotCompleteDefaultTypeInternal _SnapshotComplete_default_instance_;
+extern const ::google::protobuf::internal::ClassDataFull SnapshotComplete_class_data_;
 }  // namespace idtxcore
 namespace google {
 namespace protobuf {
@@ -74,6 +79,140 @@ namespace idtxcore {
 // ===================================================================
 
 
+// -------------------------------------------------------------------
+
+class SnapshotComplete final : public ::google::protobuf::internal::ZeroFieldsBase
+/* @@protoc_insertion_point(class_definition:idtxcore.SnapshotComplete) */ {
+ public:
+  inline SnapshotComplete() : SnapshotComplete(nullptr) {}
+
+#if defined(PROTOBUF_CUSTOM_VTABLE)
+  void operator delete(SnapshotComplete* PROTOBUF_NONNULL msg, ::std::destroying_delete_t) {
+    SharedDtor(*msg);
+    ::google::protobuf::internal::SizedDelete(msg, sizeof(SnapshotComplete));
+  }
+#endif
+
+  template <typename = void>
+  explicit PROTOBUF_CONSTEXPR SnapshotComplete(::google::protobuf::internal::ConstantInitialized);
+
+  inline SnapshotComplete(const SnapshotComplete& from) : SnapshotComplete(nullptr, from) {}
+  inline SnapshotComplete(SnapshotComplete&& from) noexcept
+      : SnapshotComplete(nullptr, ::std::move(from)) {}
+  inline SnapshotComplete& operator=(const SnapshotComplete& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline SnapshotComplete& operator=(SnapshotComplete&& from) noexcept {
+    if (this == &from) return *this;
+    if (::google::protobuf::internal::CanMoveWithInternalSwap(GetArena(), from.GetArena())) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  inline const ::google::protobuf::UnknownFieldSet& unknown_fields() const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.unknown_fields<::google::protobuf::UnknownFieldSet>(::google::protobuf::UnknownFieldSet::default_instance);
+  }
+  inline ::google::protobuf::UnknownFieldSet* PROTOBUF_NONNULL mutable_unknown_fields()
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.mutable_unknown_fields<::google::protobuf::UnknownFieldSet>();
+  }
+
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL descriptor() {
+    return GetDescriptor();
+  }
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::google::protobuf::Reflection* PROTOBUF_NONNULL GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const SnapshotComplete& default_instance() {
+    return *reinterpret_cast<const SnapshotComplete*>(
+        &_SnapshotComplete_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages = 1;
+  friend void swap(SnapshotComplete& a, SnapshotComplete& b) { a.Swap(&b); }
+  inline void Swap(SnapshotComplete* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    if (::google::protobuf::internal::CanUseInternalSwap(GetArena(), other->GetArena())) {
+      InternalSwap(other);
+    } else {
+      ::google::protobuf::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(SnapshotComplete* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    ABSL_DCHECK(GetArena() == other->GetArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  SnapshotComplete* PROTOBUF_NONNULL New(::google::protobuf::Arena* PROTOBUF_NULLABLE arena = nullptr) const {
+    return ::google::protobuf::internal::ZeroFieldsBase::DefaultConstruct<SnapshotComplete>(arena);
+  }
+  using ::google::protobuf::internal::ZeroFieldsBase::CopyFrom;
+  inline void CopyFrom(const SnapshotComplete& from) {
+    ::google::protobuf::internal::ZeroFieldsBase::CopyImpl(*this, from);
+  }
+  using ::google::protobuf::internal::ZeroFieldsBase::MergeFrom;
+  void MergeFrom(const SnapshotComplete& from) {
+    ::google::protobuf::internal::ZeroFieldsBase::MergeImpl(*this, from);
+  }
+
+  public:
+  bool IsInitialized() const {
+    return true;
+  }
+ private:
+  template <typename T>
+  friend ::absl::string_view(::google::protobuf::internal::GetAnyMessageName)();
+  static ::absl::string_view FullMessageName() { return "idtxcore.SnapshotComplete"; }
+
+  explicit SnapshotComplete(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  SnapshotComplete(::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const SnapshotComplete& from);
+  SnapshotComplete(
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, SnapshotComplete&& from) noexcept
+      : SnapshotComplete(arena) {
+    *this = ::std::move(from);
+  }
+  const ::google::protobuf::internal::ClassData* PROTOBUF_NONNULL GetClassData() const PROTOBUF_FINAL;
+  static void* PROTOBUF_NONNULL PlacementNew_(
+      const void* PROTOBUF_NONNULL, void* PROTOBUF_NONNULL mem,
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static constexpr auto InternalNewImpl_();
+
+ public:
+  static constexpr auto InternalGenerateClassData_();
+
+  ::google::protobuf::Metadata GetMetadata() const;
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+  // @@protoc_insertion_point(class_scope:idtxcore.SnapshotComplete)
+ private:
+  class _Internal;
+  friend class ::google::protobuf::internal::TcParser;
+  static const ::google::protobuf::internal::TcParseTable<0, 0,
+                                   0, 0,
+                                   2>
+      _table_;
+
+  friend class ::google::protobuf::MessageLite;
+  friend class ::google::protobuf::Arena;
+  template <typename T>
+  friend class ::google::protobuf::Arena::InternalHelper;
+  using InternalArenaConstructable_ = void;
+  using DestructorSkippable_ = void;
+  friend struct ::TableStruct_base_2eproto;
+};
+
+extern const ::google::protobuf::internal::ClassDataFull SnapshotComplete_class_data_;
 // -------------------------------------------------------------------
 
 class Handshake final : public ::google::protobuf::Message
@@ -383,9 +522,10 @@ class BaseMessage final : public ::google::protobuf::Message
     kXformBroadcast = 4,
     kAck = 5,
     kError = 6,
+    kSnapshotComplete = 7,
     MESSAGE_NOT_SET = 0,
   };
-  static constexpr int kIndexInFileMessages = 1;
+  static constexpr int kIndexInFileMessages = 2;
   friend void swap(BaseMessage& a, BaseMessage& b) { a.Swap(&b); }
   inline void Swap(BaseMessage* PROTOBUF_NONNULL other) {
     if (other == this) return;
@@ -478,6 +618,7 @@ class BaseMessage final : public ::google::protobuf::Message
     kXformBroadcastFieldNumber = 4,
     kAckFieldNumber = 5,
     kErrorFieldNumber = 6,
+    kSnapshotCompleteFieldNumber = 7,
   };
   // optional string session_id = 1;
   bool has_session_id() const;
@@ -590,6 +731,25 @@ class BaseMessage final : public ::google::protobuf::Message
   ::idtxcore::Error* PROTOBUF_NONNULL _internal_mutable_error();
 
   public:
+  // .idtxcore.SnapshotComplete snapshot_complete = 7;
+  bool has_snapshot_complete() const;
+  private:
+  bool _internal_has_snapshot_complete() const;
+
+  public:
+  void clear_snapshot_complete() ;
+  const ::idtxcore::SnapshotComplete& snapshot_complete() const;
+  [[nodiscard]] ::idtxcore::SnapshotComplete* PROTOBUF_NULLABLE release_snapshot_complete();
+  ::idtxcore::SnapshotComplete* PROTOBUF_NONNULL mutable_snapshot_complete();
+  void set_allocated_snapshot_complete(::idtxcore::SnapshotComplete* PROTOBUF_NULLABLE value);
+  void unsafe_arena_set_allocated_snapshot_complete(::idtxcore::SnapshotComplete* PROTOBUF_NULLABLE value);
+  ::idtxcore::SnapshotComplete* PROTOBUF_NULLABLE unsafe_arena_release_snapshot_complete();
+
+  private:
+  const ::idtxcore::SnapshotComplete& _internal_snapshot_complete() const;
+  ::idtxcore::SnapshotComplete* PROTOBUF_NONNULL _internal_mutable_snapshot_complete();
+
+  public:
   void clear_message();
   MessageCase message_case() const;
   // @@protoc_insertion_point(class_scope:idtxcore.BaseMessage)
@@ -600,11 +760,12 @@ class BaseMessage final : public ::google::protobuf::Message
   void set_has_xform_broadcast();
   void set_has_ack();
   void set_has_error();
+  void set_has_snapshot_complete();
   inline bool has_message() const;
   inline void clear_has_message();
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<0, 6,
-                                   5, 39,
+  static const ::google::protobuf::internal::TcParseTable<0, 7,
+                                   6, 39,
                                    2>
       _table_;
 
@@ -634,6 +795,7 @@ class BaseMessage final : public ::google::protobuf::Message
       ::google::protobuf::Message* PROTOBUF_NULLABLE xform_broadcast_;
       ::google::protobuf::Message* PROTOBUF_NULLABLE ack_;
       ::google::protobuf::Message* PROTOBUF_NULLABLE error_;
+      ::google::protobuf::Message* PROTOBUF_NULLABLE snapshot_complete_;
     } message_;
     ::uint32_t _oneof_case_[1];
     PROTOBUF_TSAN_DECLARE_MEMBER
@@ -919,6 +1081,10 @@ inline void Handshake::set_allocated_usd_uri(::std::string* PROTOBUF_NULLABLE va
   }
   // @@protoc_insertion_point(field_set_allocated:idtxcore.Handshake.usd_uri)
 }
+
+// -------------------------------------------------------------------
+
+// SnapshotComplete
 
 // -------------------------------------------------------------------
 
@@ -1356,6 +1522,88 @@ inline ::idtxcore::Error* PROTOBUF_NONNULL BaseMessage::mutable_error()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   ::idtxcore::Error* _msg = _internal_mutable_error();
   // @@protoc_insertion_point(field_mutable:idtxcore.BaseMessage.error)
+  return _msg;
+}
+
+// .idtxcore.SnapshotComplete snapshot_complete = 7;
+inline bool BaseMessage::has_snapshot_complete() const {
+  return message_case() == kSnapshotComplete;
+}
+inline bool BaseMessage::_internal_has_snapshot_complete() const {
+  return message_case() == kSnapshotComplete;
+}
+inline void BaseMessage::set_has_snapshot_complete() {
+  _impl_._oneof_case_[0] = kSnapshotComplete;
+}
+inline void BaseMessage::clear_snapshot_complete() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (message_case() == kSnapshotComplete) {
+    if (GetArena() == nullptr) {
+      delete _impl_.message_.snapshot_complete_;
+    } else if (::google::protobuf::internal::DebugHardenClearOneofMessageOnArena()) {
+      ::google::protobuf::internal::MaybePoisonAfterClear(_impl_.message_.snapshot_complete_);
+    }
+    clear_has_message();
+  }
+}
+inline ::idtxcore::SnapshotComplete* PROTOBUF_NULLABLE BaseMessage::release_snapshot_complete() {
+  // @@protoc_insertion_point(field_release:idtxcore.BaseMessage.snapshot_complete)
+  if (message_case() == kSnapshotComplete) {
+    clear_has_message();
+    auto* temp = reinterpret_cast<::idtxcore::SnapshotComplete*>(_impl_.message_.snapshot_complete_);
+    if (GetArena() != nullptr) {
+      temp = ::google::protobuf::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.message_.snapshot_complete_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::idtxcore::SnapshotComplete& BaseMessage::_internal_snapshot_complete() const {
+  return message_case() == kSnapshotComplete ? static_cast<const ::idtxcore::SnapshotComplete&>(*reinterpret_cast<::idtxcore::SnapshotComplete*>(_impl_.message_.snapshot_complete_))
+                     : reinterpret_cast<const ::idtxcore::SnapshotComplete&>(::idtxcore::_SnapshotComplete_default_instance_);
+}
+inline const ::idtxcore::SnapshotComplete& BaseMessage::snapshot_complete() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.BaseMessage.snapshot_complete)
+  return _internal_snapshot_complete();
+}
+inline ::idtxcore::SnapshotComplete* PROTOBUF_NULLABLE BaseMessage::unsafe_arena_release_snapshot_complete() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:idtxcore.BaseMessage.snapshot_complete)
+  if (message_case() == kSnapshotComplete) {
+    clear_has_message();
+    auto* temp = reinterpret_cast<::idtxcore::SnapshotComplete*>(_impl_.message_.snapshot_complete_);
+    _impl_.message_.snapshot_complete_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void BaseMessage::unsafe_arena_set_allocated_snapshot_complete(
+    ::idtxcore::SnapshotComplete* PROTOBUF_NULLABLE value) {
+  // We rely on the oneof clear method to free the earlier contents
+  // of this oneof. We can directly use the pointer we're given to
+  // set the new value.
+  clear_message();
+  if (value) {
+    set_has_snapshot_complete();
+    _impl_.message_.snapshot_complete_ = reinterpret_cast<::google::protobuf::Message*>(value);
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:idtxcore.BaseMessage.snapshot_complete)
+}
+inline ::idtxcore::SnapshotComplete* PROTOBUF_NONNULL BaseMessage::_internal_mutable_snapshot_complete() {
+  if (message_case() != kSnapshotComplete) {
+    clear_message();
+    set_has_snapshot_complete();
+    _impl_.message_.snapshot_complete_ = reinterpret_cast<::google::protobuf::Message*>(
+        ::google::protobuf::Message::DefaultConstruct<::idtxcore::SnapshotComplete>(GetArena()));
+  }
+  return reinterpret_cast<::idtxcore::SnapshotComplete*>(_impl_.message_.snapshot_complete_);
+}
+inline ::idtxcore::SnapshotComplete* PROTOBUF_NONNULL BaseMessage::mutable_snapshot_complete()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  ::idtxcore::SnapshotComplete* _msg = _internal_mutable_snapshot_complete();
+  // @@protoc_insertion_point(field_mutable:idtxcore.BaseMessage.snapshot_complete)
   return _msg;
 }
 

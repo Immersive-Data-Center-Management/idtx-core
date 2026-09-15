@@ -71,20 +71,21 @@ In addition to the `idtx-core` executable this will generate the `idtx-core-test
 
 ### Current Available Endpoints
 
-| Path                        | Authentication | Methods | Description |
-|-----------------------------|----------------|---------|-------------|
-| `/api/v1/auth/login`        | No             | POST    | Expects a username and password to authenticate against the provided IDP and hand out a JWT to be used for endpoints requiring authentication. |
-| `/api/v1/health`            | No             | GET     | Health check endpoint |
-| `/api/v1/files`             | Yes            | GET     | Returns a list of files available in the servers `uploads` folder as JSON response |
-| `/api/v1/download/<path>`   | Yes            | HEAD    | Return 200 if a valid file exists at the given path. |
-| `/api/v1/download/<path>`   | Yes            | GET     | Returns the contents of the file addressed by `<path>` |
-| `/api/v1/upload`            | Yes            | POST    | Upload a USD file (`.usd`, `.usda`, `.usdc`, `.usdz`). See below. |
-| `/api/v1/thumbnail/<path>`  | Yes            | HEAD    | Return 200 if a thumbnail image has been generated for the USD file at `<path>`. |
-| `/api/v1/thumbnail/<path>`  | Yes            | GET     | Returns the thumbnail image (PNG) generated for the USD file at `<path>`. |
-| `/api/v1/sessions`          | Yes            | GET     | Returns a list of current active multi-user sessions |
-| `/api/v1/sessions`          | Yes            | POST    | Create a new multi-user session for a specific USD file. The file path is given as JSon request body like `{ "usd_file": "scenes/foo.usda" }`. |
-| `/api/v1/sessions/<string>` | Yes            | GET     | Retreive details for the given multi-user session |
-| `/api/v1/sessions/<string>` | Yes            | DELETE  | Tear down a given multi-user session and "disconnect" all clients. |
+| Path                               | Authentication | Methods | Description |
+|------------------------------------|----------------|---------|-------------|
+| `/api/v1/auth/login`               | No             | POST    | Expects a username and password to authenticate against the provided IDP and hand out a JWT to be used for endpoints requiring authentication. |
+| `/api/v1/health`                   | No             | GET     | Health check endpoint |
+| `/api/v1/files`                    | Yes            | GET     | Returns a list of files available in the servers `uploads` folder as JSON response |
+| `/api/v1/download/<path>`          | Yes            | HEAD    | Return 200 if a valid file exists at the given path. |
+| `/api/v1/download/<path>`          | Yes            | GET     | Returns the contents of the file addressed by `<path>` |
+| `/api/v1/upload`                   | Yes            | POST    | Upload a USD file (`.usd`, `.usda`, `.usdc`, `.usdz`). See below. |
+| `/api/v1/thumbnail/<path>`         | Yes            | HEAD    | Return 200 if a thumbnail image has been generated for the USD file at `<path>`. |
+| `/api/v1/thumbnail/<path>`         | Yes            | GET     | Returns the thumbnail image (PNG) generated for the USD file at `<path>`. |
+| `/api/v1/sessions`                 | Yes            | GET     | Returns a list of current active multi-user sessions |
+| `/api/v1/sessions`                 | Yes            | POST    | Create a new multi-user session for a specific USD file. The file path is given as JSon request body like `{ "usd_file": "scenes/foo.usda" }`. |
+| `/api/v1/sessions/<string>`        | Yes            | GET     | Retreive details for the given multi-user session |
+| `/api/v1/sessions/<string>/commit` | Yes            | POST    | Commit session changes (single/collab-edit) to the original USD file, attached to the session. |
+| `/api/v1/sessions/<string>`        | Yes            | DELETE  | Tear down a given multi-user session and "disconnect" all clients. |
 
 #### Uploading USD files
 
