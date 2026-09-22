@@ -43,6 +43,7 @@ namespace security
         BodyTooLarge,           ///< A request body exceeded the configured cap.
         ConcurrencyLimited,     ///< A concurrency/backpressure limit was hit.
         Unauthorized,           ///< A protected route was accessed without valid auth.
+        AuthenticationDisabled, ///< Authentication was disabled by insecure configuration.
     };
 
     /**
@@ -59,6 +60,7 @@ namespace security
         case AuditEvent::BodyTooLarge:           return "body_too_large";
         case AuditEvent::ConcurrencyLimited:     return "concurrency_limited";
         case AuditEvent::Unauthorized:           return "unauthorized";
+        case AuditEvent::AuthenticationDisabled: return "authentication_disabled";
         default:                                 return "unknown";
         }
     }
