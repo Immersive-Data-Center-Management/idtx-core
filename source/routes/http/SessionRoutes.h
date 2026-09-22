@@ -50,6 +50,13 @@ public:
             ([this](const std::string& session_id) {
                 return m_sessionController_->DeleteSession(session_id);
             });
+
+        // Commit a session's overrides back into its original USD file.
+        CROW_ROUTE(m_app_, "/api/v1/sessions/<string>/commit")
+            .methods(crow::HTTPMethod::Post)
+            ([this](const crow::request& /*req*/, const std::string& session_id) {
+                return m_sessionController_->CommitSession(session_id);
+            });
     }
 
 private:

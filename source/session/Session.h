@@ -14,9 +14,12 @@
  */
 #pragma once
 
+#include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <unordered_set>
@@ -40,6 +43,7 @@ struct Session
 {
     std::string                                       id;
     std::string                                       usd_file;       // relative to uploads/
+    std::filesystem::path                             usd_file_absolute; // resolved on-disk path
     pxr::UsdStageRefPtr                               stage;
     std::chrono::system_clock::time_point             created_at = std::chrono::system_clock::now();
 
@@ -57,6 +61,13 @@ struct Session
     // lock; attach/detach take exclusive.
     mutable std::shared_mutex                         clients_mutex;
     std::unordered_set<crow::websocket::connection*>  clients;
+
+    // Set to steady_clock::now() when the client set becomes empty (and at
+    // creation, since a new session starts with no clients); reset whenever a
+    // client attaches. Read by the SessionManager idle reaper to decide when a
+    // session has been unused long enough to destroy. Guarded by clients_mutex.
+    std::optional<std::chrono::steady_clock::time_point> empty_since =
+        std::chrono::steady_clock::now();
 
     // The connection that last initiated a stage authoring action. This is
     // set under stage_mutex by SessionManager::ApplyTransformUpdate so that
@@ -80,6 +91,27 @@ struct Session
     // stage_mutex is held (TfNotice fires synchronously on the authoring
     // thread), so no additional synchronisation is needed.
     bool                                              reload_in_progress = false;
+
+    // On-disk sidecar layer that backs the stage's session layer. Client
+    // edits are authored into the session layer, which is this named file,
+    // so persisting is a plain SdfLayer::Save(). Convention:
+    // "<uploads_root>/sessions/<session-id>.usda". Opening a stage with this
+    // file as the session layer on a subsequent run restores prior state.
+    std::filesystem::path                             sidecar_path;
+
+    // Set to true whenever a stage authoring action succeeds (in
+    // SessionManager::ApplyTransformUpdate) and reset to false by the
+    // SessionFlusher after it has Save()-d the session layer to the sidecar.
+    // Atomic because it is read/written from the flusher thread and the
+    // websocket authoring thread without holding stage_mutex.
+    std::atomic<bool>                                 dirty{false};
+
+    // When true, the session's sidecar overrides are committed back into the
+    // original USD file when the session is destroyed (by explicit DELETE or
+    // the idle reaper). When false, overrides live only in the sidecar until
+    // an explicit POST /commit; a teardown with uncommitted overrides logs a
+    // warning so the potential data-loss event is visible in monitoring.
+    bool                                              auto_commit = false;
 };
 
 } // namespace session

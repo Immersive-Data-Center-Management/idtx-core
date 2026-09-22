@@ -177,6 +177,10 @@ TestServer::TestServer(Options opts)
     SetEnv("SERVER_PORT", std::to_string(m_port_));
     SetEnv("IDTX_THUMBNAIL_ENABLED", m_opts_.thumbnails_enabled ? "true" : "false");
     SetEnv("IDTX_THUMBNAIL_SIZE",    std::to_string(m_opts_.thumbnail_size));
+    // Always set the idle-reaper timeout explicitly (default 0 = disabled) so a
+    // value from a prior reaper test in the same process cannot leak in.
+    SetEnv("IDTX_SESSION_IDLE_TIMEOUT_SECONDS",
+           std::to_string(m_opts_.idle_timeout_seconds));
     // Pin the uploads root to this test's isolated temp directory. The server
     // now defaults IDTX_UPLOADS_ROOT to an absolute container path
     // ("/app/uploads"), so tests must override it explicitly rather than rely

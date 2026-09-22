@@ -31,6 +31,7 @@ public:
     crow::response GetSession(const std::string& session_id);
     crow::response CreateSession(const crow::request& req);
     crow::response DeleteSession(const std::string& session_id);
+    crow::response CommitSession(const std::string& session_id);
 
 private:
     std::shared_ptr<idtx::session::SessionManager> m_manager_;

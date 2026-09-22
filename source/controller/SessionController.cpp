@@ -71,7 +71,8 @@ crow::response SessionController::CreateSession(const crow::request& req)
         std::string error_msg;
         idtx::session::SessionManager::CreateStatus status =
             idtx::session::SessionManager::CreateStatus::Ok;
-        auto session = m_manager_->Create(body.usd_file, body.mode, error_msg, status);
+        auto session = m_manager_->Create(body.usd_file, body.mode, error_msg, status,
+                                          body.auto_commit);
 
         if (!session)
         {
@@ -105,4 +106,28 @@ crow::response SessionController::DeleteSession(const std::string& session_id)
         return idtx::dto::make_error(404, "not_found", "Session not found.");
     }
     return crow::response(204);
+}
+
+crow::response SessionController::CommitSession(const std::string& session_id)
+{
+    std::string error_msg;
+    const auto status = m_manager_->CommitSession(session_id, error_msg);
+    using CommitStatus = idtx::session::SessionManager::CommitStatus;
+    switch (status)
+    {
+        case CommitStatus::Ok:
+        {
+            crow::response res(200, json{{"committed", true},
+                                         {"session_id", session_id}}.dump());
+            res.set_header("Content-Type", "application/json");
+            return res;
+        }
+        case CommitStatus::UnknownSession:
+            return idtx::dto::make_error(404, "not_found", "Session not found.");
+        case CommitStatus::NothingToCommit:
+            return idtx::dto::make_error(409, "nothing_to_commit", error_msg);
+        case CommitStatus::WriteFailed:
+        default:
+            return idtx::dto::make_error(500, "commit_failed", error_msg);
+    }
 }

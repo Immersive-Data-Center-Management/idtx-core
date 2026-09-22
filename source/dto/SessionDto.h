@@ -44,18 +44,21 @@ namespace dto
      * @brief Body of POST /api/v1/sessions.
      *
      * The @c mode field is optional and defaults to
-     * @c SessionMode::SingleEdit when omitted.
+     * @c SessionMode::SingleEdit when omitted. The @c auto_commit field is
+     * optional and defaults to @c false; when true, the session's overrides are
+     * merged back into the original USD file when the session is destroyed.
      *
      * @code{.json}
-     * { "usd_file": "scenes/foo.usda", "mode": "collaborative_edit" }
+     * { "usd_file": "scenes/foo.usda", "mode": "collaborative_edit", "auto_commit": true }
      * @endcode
      */
     struct CreateSessionRequest
     {
         std::string usd_file;
         SessionMode mode = SessionMode::SingleEdit;
+        bool        auto_commit = false;
     };
 
-    NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(CreateSessionRequest, usd_file, mode)
+    NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(CreateSessionRequest, usd_file, mode, auto_commit)
 }
 }

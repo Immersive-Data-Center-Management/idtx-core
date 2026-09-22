@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -27,7 +28,11 @@
 #include "controller/SessionController.h"
 #include "controller/WebSocketController.h"
 #include "session/SessionManager.h"
+#include "session/SessionFlusher.h"
 #include "thumbnails/PlaceholderThumbnailGenerator.h"
+#if defined(IDTX_ENABLE_IMAGING)
+#include "thumbnails/UsdImagingThumbnailGenerator.h"
+#endif
 #include "thumbnails/ThumbnailWorker.h"
 #include "utils/Environment.h"
 #include "utils/UsdFileLocator.h"
@@ -49,6 +54,7 @@ struct ApplicationContext
     std::shared_ptr<AuthController>                    authController;
     std::shared_ptr<FileServingController>             fileServingController;
     std::shared_ptr<idtx::session::SessionManager>     sessionManager;
+    std::shared_ptr<idtx::session::SessionFlusher>     sessionFlusher;
     std::shared_ptr<SessionController>                 sessionController;
     std::shared_ptr<WebSocketController>               webSocketController;
 
@@ -64,6 +70,10 @@ struct ApplicationContext
      * Environment variables consulted:
      *   - @c IDTX_THUMBNAIL_ENABLED  (default: "true")
      *   - @c IDTX_THUMBNAIL_SIZE     (default: 256)
+     *   - @c IDTX_SESSION_IDLE_TIMEOUT_SECONDS (default: 300; 0 disables the reaper)
+     *   - @c IDTX_THUMBNAIL_RENDER   (default: "real" when built with imaging;
+     *     set to "placeholder" to force the metadata-only generator. Ignored
+     *     unless the binary was built with @c IDTX_ENABLE_IMAGING.)
      *   - @c OAUTH_TOKEN_URL, @c OAUTH_CLIENT_ID,
      *     @c OAUTH_CLIENT_SECRET, @c OAUTH_SCOPE
      *
@@ -81,9 +91,12 @@ struct ApplicationContext
         //
         // The uploads root is configurable via IDTX_UPLOADS_ROOT.
         const std::string uploads_root =
-            EnvironmentUtils::get_env("IDTX_UPLOADS_ROOT").value_or("/app/uploads");
+            EnvironmentUtils::get_env("IDTX_UPLOADS_ROOT").value_or("./uploads");
+        // The session root folder is configurable via IDTX_SESSIONS_ROOT
+        const std::string session_root =
+            EnvironmentUtils::get_env("IDTX_SESSIONS_ROOT").value_or("./sessions");
         ctx.usdFileLocator        =
-            std::make_shared<idtx::utils::UsdFileLocator>(uploads_root);
+            std::make_shared<idtx::utils::UsdFileLocator>(uploads_root, session_root);
 
         // Fail fast: make sure the uploads root exists and is writable by this
         // process *now*, at startup, rather than surfacing an opaque
@@ -104,9 +117,11 @@ struct ApplicationContext
         }
 
         // Thumbnail generation is opt-out via IDTX_THUMBNAIL_ENABLED=false.
-        // The placeholder generator is safe to run in the current container
-        // (no imaging deps required); it can later be swapped for a Hydra-
-        // based implementation without touching the controller.
+        // When the binary is built with imaging (IDTX_ENABLE_IMAGING), the
+        // Hydra-based UsdImagingThumbnailGenerator renders a real preview of
+        // the stage (it internally falls back to the placeholder on any render
+        // failure). Otherwise, or when IDTX_THUMBNAIL_RENDER=placeholder, the
+        // metadata-only placeholder generator is used.
         const auto thumb_enabled =
             EnvironmentUtils::get_env("IDTX_THUMBNAIL_ENABLED").value_or("true");
         if (thumb_enabled != "false" && thumb_enabled != "0")
@@ -117,8 +132,25 @@ struct ApplicationContext
                 try { size = static_cast<std::uint32_t>(std::stoul(*s)); }
                 catch (...) { /* keep default */ }
             }
-            auto generator =
+
+            std::shared_ptr<idtx::thumbnails::ThumbnailGenerator> generator;
+#if defined(IDTX_ENABLE_IMAGING)
+            const auto render_mode =
+                EnvironmentUtils::get_env("IDTX_THUMBNAIL_RENDER").value_or("real");
+            if (render_mode == "placeholder")
+            {
+                generator =
+                    std::make_shared<idtx::thumbnails::PlaceholderThumbnailGenerator>(size);
+            }
+            else
+            {
+                generator =
+                    std::make_shared<idtx::thumbnails::UsdImagingThumbnailGenerator>(size);
+            }
+#else
+            generator =
                 std::make_shared<idtx::thumbnails::PlaceholderThumbnailGenerator>(size);
+#endif
             ctx.thumbnailWorker =
                 std::make_shared<idtx::thumbnails::ThumbnailWorker>(generator);
         }
@@ -142,8 +174,26 @@ struct ApplicationContext
         // wired up with a link back to the manager: an upload that replaces
         // an existing USD file will then trigger a root-layer reload on
         // every live session bound to that file.
+        //
+        // A background reaper destroys any session that has had zero connected
+        // clients for IDTX_SESSION_IDLE_TIMEOUT_SECONDS (default 300s). Set the
+        // variable to 0 to disable the reaper and keep sessions until an
+        // explicit DELETE.
+        const auto idle_secs =
+            EnvironmentUtils::get_env_u64("IDTX_SESSION_IDLE_TIMEOUT_SECONDS", 300);
         ctx.sessionManager        = std::make_shared<idtx::session::SessionManager>(
-                                        *ctx.usdFileLocator);
+                                        *ctx.usdFileLocator,
+                                        std::chrono::seconds{idle_secs});
+
+        // Background worker that persists dirty session layers to their
+        // sidecar files on a fixed interval (default 2 s). Configurable via
+        // IDTX_SESSION_FLUSH_INTERVAL_MS. Declared after the manager so it is
+        // torn down (and does its final flush) before the manager is destroyed.
+        const auto flush_ms =
+            EnvironmentUtils::get_env_u64("IDTX_SESSION_FLUSH_INTERVAL_MS", 2000);
+        ctx.sessionFlusher        = std::make_shared<idtx::session::SessionFlusher>(
+                                        ctx.sessionManager,
+                                        std::chrono::milliseconds{flush_ms});
 
         ctx.fileServingController = std::make_shared<FileServingController>(
                                         ctx.usdFileLocator,

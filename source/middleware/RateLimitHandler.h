@@ -76,11 +76,11 @@ namespace middleware
             std::chrono::seconds loginLockout       = std::chrono::seconds(300);
 
             /// Maximum accepted request body size for the login endpoint (bytes).
-            std::size_t          loginMaxBodyBytes  = 4ULL * 1024;   // 4 KiB
+            std::uint64_t         loginMaxBodyBytes  = std::uint64_t{4} * 1024;   // 4 KiB
             /// Maximum accepted request body size for the upload endpoint (bytes).
-            std::size_t          uploadMaxBodyBytes = 8ULL * 1024 * 1024 * 1024; // 8 GiB, as USD assets can get quite huge
+            std::uint64_t         uploadMaxBodyBytes = std::uint64_t{8} * 1024 * 1024 * 1024; // 8 GiB, as USD assets can get quite huge
             /// Maximum accepted request body size for any other endpoint (bytes).
-            std::size_t          globalMaxBodyBytes = 8ULL * 1024 * 1024; // 8 MiB
+            std::uint64_t         globalMaxBodyBytes = std::uint64_t{8} * 1024 * 1024; // 8 MiB
 
             /// Trust X-Forwarded-For for client-IP resolution (true behind LB/ingress).
             bool                 trustForwardedFor  = true;
@@ -168,7 +168,7 @@ namespace middleware
                                   (path == c_uploadPath_);
 
             // 1) Body-size cap (cheap, do first to shed heavy payloads early).
-            const std::size_t maxBody = isLogin ? m_config_.loginMaxBodyBytes 
+            const std::uint64_t maxBody = isLogin ? m_config_.loginMaxBodyBytes 
                                             : isUpload ? m_config_.uploadMaxBodyBytes
                                                 : m_config_.globalMaxBodyBytes;
             if (req.body.size() > maxBody)
