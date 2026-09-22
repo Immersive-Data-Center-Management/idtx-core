@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include "utils/Environment.h"
+#include "utils/SecurityAuditLog.h"
 
 namespace 
 {
@@ -43,8 +44,16 @@ idtx::middleware::OidcConfiguration idtx::middleware::OidcConfiguration::create(
                                                                                 const std::string& audiencesVar)
 {
     OidcConfiguration oidcData;
-    const auto auth_enabled = EnvironmentUtils::get_env("IDTX_OIDC_ENABLED").value_or("true");
-    oidcData.enabled = auth_enabled != "false" && auth_enabled != "0";
+    const auto disable_auth = EnvironmentUtils::get_env("IDTX_INSECURE_DISABLE_AUTH").value_or("false");
+    oidcData.enabled = disable_auth != "true" && disable_auth != "1";
+
+    if (!oidcData.enabled)
+    {
+        idtx::security::SecurityAuditLog::Record({
+            .event = idtx::security::AuditEvent::AuthenticationDisabled,
+            .detail = "IDTX_INSECURE_DISABLE_AUTH is enabled"
+        });
+    }
 
     if (oidcData.enabled)
     {

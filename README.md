@@ -54,7 +54,7 @@ OAUTH_TOKEN_URL=<usually something like: https://my-idp-server.com/openid-connec
 OAUTH_CLIENT_ID=
 ```
 
-For local testing without authentication, set `IDTX_OIDC_ENABLED=false`. When OIDC is disabled, `OIDC_WELLKNOWN_URL` and `OIDC_AUDIENCES` are not required. Authentication remains enabled by default.
+For local testing without authentication, set `IDTX_INSECURE_DISABLE_AUTH=true` or `1`. When authentication is disabled, `OIDC_WELLKNOWN_URL` and `OIDC_AUDIENCES` are not required. Authentication remains enabled by default; do not set this insecure option in production.
 
 The default port of the server is `8080`. The `.env` setting `SERVER_PORT=<other port>` allows to override this default setting.
 
