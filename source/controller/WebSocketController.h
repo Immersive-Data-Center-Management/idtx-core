@@ -26,6 +26,9 @@ class WebSocketController
     struct WsUserData
     {
         std::string session_id;
+        // Captured at accept time: querying the socket later throws once it
+        // has been closed, e.g. inside the close handler.
+        std::string remote_ip;
     };
 
 public:

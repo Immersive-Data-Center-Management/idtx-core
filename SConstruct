@@ -244,7 +244,10 @@ if platform_name == "linux":
 
 elif platform_name == "windows":
     env.Append(LIBS=libs + ["advapi32", "shell32", "ole32"])
-    env.Append(CPPDEFINES=["NOMINMAX", "WIN32_LEAN_AND_MEAN", "_WIN32_WINDOWS"])
+    # Pin the Windows target version for every TU. Without it, asio only enables
+    # its IOCP backend in TUs that happen to include a Windows SDK header first,
+    # which gives different asio socket layouts across TUs (an ODR violation).
+    env.Append(CPPDEFINES=["NOMINMAX", "WIN32_LEAN_AND_MEAN", "_WIN32_WINDOWS", ("_WIN32_WINNT", "0x0A00")])
     env.Append(LINKFLAGS=['/SUBSYSTEM:CONSOLE'])
     # deactivate this warning. This appears due to an issue in openUSD-26.05 where the definition of
     # 'std::ostream &Vt_ArrayEditStreamImpl()' is missing the 'VT_API' decorator

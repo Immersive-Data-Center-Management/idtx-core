@@ -45,6 +45,7 @@ bool WebSocketController::OnAccept(const crow::request& req, void** userdata)
 
     auto* ws_data = new WsUserData();
     ws_data->session_id = std::move(sid);
+    ws_data->remote_ip  = req.remote_ip_address;
     *userdata = ws_data;
 
     IDTX_LOG(IDTX_DEBUG, "Websocket accepted for session {}.", ws_data->session_id);
@@ -113,23 +114,25 @@ void WebSocketController::OnOpen(crow::websocket::connection& conn)
     m_manager_->SendJoinSnapshot(session, &conn);
 
     IDTX_LOG(IDTX_INFO, "WebSocket connection opened for session {} from {}.",
-             session->id, conn.get_remote_ip());
+             session->id, ws_data->remote_ip);
 }
 
 void WebSocketController::OnClose(crow::websocket::connection& conn,
                                   const std::string& reason, uint16_t code)
 {
-    auto* ws_data = static_cast<WsUserData*>(conn.userdata());
-    if (ws_data)
+    // Crow can invoke the close handler more than once for a connection, so
+    // detach the user data before releasing it. This handler must not throw:
+    // an exception here skips crow's own cleanup of the connection.
+    std::unique_ptr<WsUserData> ws_data(static_cast<WsUserData*>(conn.userdata()));
+    conn.userdata(nullptr);
+    if (!ws_data) return;
+
+    if (m_manager_ && !ws_data->session_id.empty())
     {
-        if (m_manager_ && !ws_data->session_id.empty())
-        {
-            m_manager_->DetachClient(ws_data->session_id, &conn);
-        }
-        delete ws_data;
+        m_manager_->DetachClient(ws_data->session_id, &conn);
     }
     IDTX_LOG(IDTX_INFO, "WebSocket connection closed: {} (code={}, reason={}).",
-             conn.get_remote_ip(), code, reason);
+             ws_data->remote_ip, code, reason);
 }
 
 void WebSocketController::OnMessage(crow::websocket::connection& conn,
