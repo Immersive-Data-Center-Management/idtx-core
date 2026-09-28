@@ -10,10 +10,12 @@ namespace idtx::tests
 std::string BuildTransformUpdate(const std::string& session_id,
                                  const std::string& usd_file,
                                  const std::string& prim_path,
-                                 double tx, double ty, double tz)
+                                 double tx, double ty, double tz,
+                                 const std::uint64_t request_id)
 {
     idtxcore::BaseMessage msg;
     msg.set_session_id(session_id);
+    msg.set_request_id(request_id);
 
     auto* upd = msg.mutable_xform_update();
     upd->set_session_id(session_id);
