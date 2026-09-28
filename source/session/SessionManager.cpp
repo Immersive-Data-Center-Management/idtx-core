@@ -4,6 +4,7 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <set>
 #include <utility>
 #include <vector>
@@ -24,6 +25,7 @@
 #include <idtx/proto/base.pb.h>
 #include <idtx/proto/transform.pb.h>
 
+#include "concurrency/WorkerExecutor.h"
 #include "StageCommitter.h"
 #include "StageNoticeListener.h"
 #include "TransformDispatcher.h"
@@ -34,9 +36,127 @@ namespace idtx
 namespace session
 {
 
+namespace
+{
+
+// Helper for std::visit over the command variant.
+template<typename... Handlers>
+struct Overloaded : Handlers...
+{
+    using Handlers::operator()...;
+};
+
+bool ReadResolvedTransform(const pxr::UsdStageRefPtr& stage,
+                           const std::string& prim_path_str,
+                           idtxcore::SeparateTransform& out_sep,
+                           idtxcore::Matrix4dTransform& out_mat,
+                           bool& out_use_matrix)
+{
+    if (!stage || !pxr::SdfPath::IsValidPathString(prim_path_str)) return false;
+    pxr::UsdPrim prim = stage->GetPrimAtPath(pxr::SdfPath(prim_path_str));
+    if (!prim) return false;
+
+    pxr::UsdGeomXformable xformable(prim);
+    if (!xformable) return false;
+
+    pxr::UsdGeomXformCommonAPI api(prim);
+    if (api)
+    {
+        pxr::GfVec3d t;
+        pxr::GfVec3f r;
+        pxr::GfVec3f s;
+        pxr::GfVec3f pivot;
+        pxr::UsdGeomXformCommonAPI::RotationOrder order;
+        if (api.GetXformVectorsByAccumulation(&t, &r, &s, &pivot, &order,
+                                              pxr::UsdTimeCode::Default()))
+        {
+            out_sep.mutable_translation()->set_x(t[0]);
+            out_sep.mutable_translation()->set_y(t[1]);
+            out_sep.mutable_translation()->set_z(t[2]);
+            out_sep.mutable_rotation()->set_x(r[0]);
+            out_sep.mutable_rotation()->set_y(r[1]);
+            out_sep.mutable_rotation()->set_z(r[2]);
+            out_sep.mutable_scale()->set_x(s[0]);
+            out_sep.mutable_scale()->set_y(s[1]);
+            out_sep.mutable_scale()->set_z(s[2]);
+            out_use_matrix = false;
+            return true;
+        }
+    }
+
+    pxr::GfMatrix4d local(1.0);
+    bool resets = false;
+    if (!xformable.GetLocalTransformation(&local, &resets, pxr::UsdTimeCode::Default()))
+        return false;
+
+    out_mat.set_m00(local[0][0]); out_mat.set_m01(local[0][1]); out_mat.set_m02(local[0][2]); out_mat.set_m03(local[0][3]);
+    out_mat.set_m10(local[1][0]); out_mat.set_m11(local[1][1]); out_mat.set_m12(local[1][2]); out_mat.set_m13(local[1][3]);
+    out_mat.set_m20(local[2][0]); out_mat.set_m21(local[2][1]); out_mat.set_m22(local[2][2]); out_mat.set_m23(local[2][3]);
+    out_mat.set_m30(local[3][0]); out_mat.set_m31(local[3][1]); out_mat.set_m32(local[3][2]); out_mat.set_m33(local[3][3]);
+    out_use_matrix = true;
+    return true;
+}
+
+/// Build a serialized BaseMessage(xform_broadcast) for @p prim_path from the
+/// resolved transform on @p session's stage, stamped with @p server_seq.
+/// Returns false when the prim has no readable transform. Shared by the live
+/// broadcast and the join snapshot.
+bool BuildBroadcastPayload(const Session& session,
+                           const std::string& prim_path,
+                           std::uint64_t server_seq,
+                           std::string& out_payload)
+{
+    idtxcore::SeparateTransform sep;
+    idtxcore::Matrix4dTransform mat;
+    bool use_matrix = false;
+    if (!ReadResolvedTransform(session.stage, prim_path, sep, mat, use_matrix))
+        return false;
+
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session.id);
+    msg.set_server_seq(server_seq);
+    auto* bcast = msg.mutable_xform_broadcast();
+    bcast->set_client_id(""); // server-originated
+
+    auto* upd = bcast->mutable_update();
+    upd->set_session_id(session.id);
+    upd->set_usd_file(session.usd_file);
+    upd->set_prim_path(prim_path);
+    upd->set_timestamp(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    if (use_matrix) *upd->mutable_matrix()   = std::move(mat);
+    else            *upd->mutable_seperate() = std::move(sep);
+
+    return msg.SerializeToString(&out_payload);
+}
+
+std::string SerializeAck(const Session& session,
+                         std::uint64_t request_id,
+                         bool ok,
+                         const std::string& error)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session.id);
+    msg.set_request_id(request_id);
+    msg.set_server_seq(session.server_seq.load());
+    auto* ack = msg.mutable_ack();
+    ack->set_ok(ok);
+    if (!ok) ack->set_error(error);
+
+    std::string payload;
+    msg.SerializeToString(&payload);
+    return payload;
+}
+
+} // namespace
+
 SessionManager::SessionManager(idtx::utils::UsdFileLocator file_locator,
-                               std::chrono::seconds idle_timeout)
-    : m_locator_(std::move(file_locator))
+                               std::chrono::seconds idle_timeout,
+                               std::size_t worker_count)
+    : m_executor_(std::make_shared<idtx::concurrency::WorkerExecutor>(
+          std::max<std::size_t>(worker_count, 1)))
+    , m_locator_(std::move(file_locator))
     , m_sessions_dir_(std::filesystem::path(m_locator_.GetSessionRoot()))
     , m_idle_timeout_(idle_timeout)
 {
@@ -50,6 +170,9 @@ SessionManager::SessionManager(idtx::utils::UsdFileLocator file_locator,
                  "Could not create sessions dir '{}': {}. Sidecar persistence may fail.",
                  m_sessions_dir_.string(), ec.message());
     }
+
+    IDTX_LOG(IDTX_INFO, "Session command executor started with {} worker(s).",
+             m_executor_->WorkerCount());
 
     if (m_idle_timeout_ > std::chrono::seconds{0})
     {
@@ -71,30 +194,50 @@ SessionManager::~SessionManager()
     m_reaper_cv_.notify_all();
     if (m_reaper_thread_.joinable()) m_reaper_thread_.join();
 
-    // Deterministic teardown:
-    //   1. Revoke every StageNoticeListener first, so no notice can fire
-    //      against a half-destroyed Session while we're clearing state.
-    //   2. Clear each stage's session layer to drop the anonymous overrides
-    //      before the last UsdStage refcount goes away. Without this, the
-    //      USD teardown path can race with a concurrent
-    //      SdfLayer::FindOrOpen() on the same on-disk path from the
-    //      thumbnail worker: the layer registry may briefly observe a
-    //      partially-torn-down layer and hand it back to the caller, which
-    //      then crashes when the last strong reference drops.
-    //   3. Only then drop the shared_ptrs, releasing the UsdStage handles
+    // Take the sessions out of the map first and tear them down without
+    // m_mutex_ held: a command that is still draining may call back into the
+    // manager (for example a commit that schedules reloads).
+    std::unordered_map<std::string, std::shared_ptr<Session>> sessions;
+    {
+        std::unique_lock lk(m_mutex_);
+        sessions.swap(m_sessions_);
+    }
+
+    // Deterministic teardown, per session:
+    //   1. Stop admission and let the consumer finish accepted commands.
+    //   2. Revoke the StageNoticeListener so no notice can fire against a
+    //      half-destroyed Session while we're clearing state.
+    //   3. Clear the stage's session layer to drop the overrides before the
+    //      last UsdStage refcount goes away. Without this, the USD teardown
+    //      path can race with a concurrent SdfLayer::FindOrOpen() on the same
+    //      on-disk path from the thumbnail worker: the layer registry may
+    //      briefly observe a partially-torn-down layer and hand it back to the
+    //      caller, which then crashes when the last strong reference drops.
+    //   4. Only then drop the shared_ptrs, releasing the UsdStage handles
     //      and, transitively, the SdfLayers.
-    std::unique_lock lk(m_mutex_);
-    for (auto& [id, session] : m_sessions_)
+    for (auto& [id, session] : sessions)
     {
         (void)id;
         TeardownSession(session);
     }
-    m_sessions_.clear();
+    sessions.clear();
+
+    // Every session is idle, so no drain task can be pending. Joining here
+    // guarantees no worker thread outlives the manager.
+    m_executor_->Stop();
 }
 
 void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
 {
     if (!session) return;
+
+    if (session->commands)
+    {
+        session->commands->CloseAdmission();
+        session->commands->WaitIdle();
+    }
+    // From here on this thread has exclusive access to the stage.
+
     if (session->listener) session->listener->Revoke();
 
     const pxr::SdfLayerHandle session_layer =
@@ -103,20 +246,16 @@ void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
 
     // Auto-commit on destroy folds the sidecar overrides back into the original
     // file (preserving composition arcs). We deliberately do NOT trigger a
-    // ReloadSessionsForFile() here: teardown may run from ~SessionManager while
-    // m_mutex_ is held, and the session is being dropped anyway.
+    // ReloadSessionsForFile() here: the session is being dropped anyway.
     bool committed = false;
     if (session->auto_commit && session->stage && has_overrides)
     {
-        std::lock_guard lk(session->stage_mutex);
-        if (auto sl = session->stage->GetSessionLayer()) sl->Save(); // best-effort flush
-        std::string err;
-        committed = StageCommitter::Commit(
-            session->stage, session->usd_file_absolute.string(), err);
+        const CommitResult result = CommitOverrides(*session);
+        committed = result.status == CommitStatus::Ok;
         if (!committed)
             IDTX_LOG(IDTX_ERROR,
                      "Auto-commit failed for session {} -> '{}': {}",
-                     session->id, session->usd_file, err);
+                     session->id, session->usd_file, result.error);
     }
 
     // Make data-loss events visible in monitoring before we drop the state.
@@ -257,6 +396,16 @@ std::shared_ptr<Session> SessionManager::Create(const std::string& usd_file,
     session->sidecar_path      = sidecar_path;
     session->created_at        = std::chrono::system_clock::now();
 
+    // The handler holds a plain pointer: TeardownSession() waits for the
+    // consumer to go idle before the session can be released, so the pointer
+    // never outlives a running command.
+    session->commands = SessionCommandScheduler::Create(
+        m_executor_,
+        [this, raw = session.get()](SessionCommand&& command)
+        {
+            ProcessCommand(*raw, std::move(command));
+        });
+
     session->listener = std::make_shared<StageNoticeListener>(this, std::weak_ptr<Session>(session));
     session->listener->Register();
 
@@ -304,9 +453,9 @@ bool SessionManager::Destroy(const std::string& id)
         m_sessions_.erase(it);
     }
 
-    // Teardown (final commit/flush, warnings, sidecar removal, session-layer
-    // clear) runs outside m_mutex_ so the map lock is not held across USD and
-    // filesystem work.
+    // Teardown (drain, final commit/flush, warnings, sidecar removal,
+    // session-layer clear) runs outside m_mutex_ so the map lock is not held
+    // across USD and filesystem work.
     TeardownSession(victim);
     IDTX_LOG(IDTX_INFO, "Destroyed session {}.", id);
     return true;
@@ -337,68 +486,24 @@ std::size_t SessionManager::ReloadSessionsForFile(const std::string& usd_file)
         return 0;
     }
 
-    std::size_t reloaded = 0;
+    std::size_t accepted = 0;
     for (const auto& session : sessions)
     {
-        if (!session || !session->stage) continue;
-
-        const pxr::SdfLayerHandle root_layer = session->stage->GetRootLayer();
-        if (!root_layer)
+        if (!session) continue;
+        const auto status = Submit(*session, ReloadCommand{});
+        if (status == SubmitStatus::Accepted)
+        {
+            ++accepted;
+        }
+        else
         {
             IDTX_LOG(IDTX_WARN,
-                     "ReloadSessionsForFile: session {} has no root layer; skipping.",
-                     session->id);
-            continue;
+                     "ReloadSessionsForFile: session {} did not accept the reload ({}).",
+                     session->id,
+                     status == SubmitStatus::QueueFull ? "queue full" : "closing");
         }
-
-        {
-            // Serialise against ApplyTransformUpdate so the reload notice
-            // fires atomically w.r.t. client-driven authoring.
-            std::lock_guard lk(session->stage_mutex);
-
-            // Signal to StageNoticeListener that the imminent
-            // UsdNotice::ObjectsChanged is a reload, not a client-authored
-            // change, so the listener can consult the session layer to
-            // decide whether the reload is visible to attached clients.
-            session->reload_in_progress = true;
-            // No client-authored change to attribute here; make sure the
-            // "suppress echo to origin" mechanism cannot spuriously fire.
-            session->last_origin        = nullptr;
-
-            bool ok = false;
-            try
-            {
-                pxr::SdfChangeBlock block;
-                ok = root_layer->Reload(/*force=*/true);
-            }
-            catch (const std::exception& e)
-            {
-                session->reload_in_progress = false;
-                IDTX_LOG(IDTX_ERROR,
-                         "SdfLayer::Reload threw for session {} ('{}'): {}",
-                         session->id, usd_file, e.what());
-                continue;
-            }
-
-            if (!ok)
-            {
-                // Reload can legitimately return false when the file hasn't
-                // changed on disk. In that case no notice will fire, so we
-                // must clear the flag ourselves.
-                session->reload_in_progress = false;
-                IDTX_LOG(IDTX_DEBUG,
-                         "SdfLayer::Reload reported no change for session {} ('{}').",
-                         session->id, usd_file);
-                continue;
-            }
-        }
-
-        ++reloaded;
-        IDTX_LOG(IDTX_INFO,
-                 "Reloaded root layer for session {} ('{}').",
-                 session->id, usd_file);
     }
-    return reloaded;
+    return accepted;
 }
 
 // ---------------------------------------------------------------------------
@@ -407,6 +512,7 @@ std::size_t SessionManager::ReloadSessionsForFile(const std::string& usd_file)
 
 SessionManager::AttachStatus SessionManager::AttachClient(
     const std::string& session_id,
+    const ConnectionId connection_id,
     crow::websocket::connection* conn)
 {
     auto session = Get(session_id);
@@ -424,7 +530,7 @@ SessionManager::AttachStatus SessionManager::AttachClient(
                  session_id);
         return AttachStatus::SingleEditBusy;
     }
-    session->clients.insert(conn);
+    session->clients.insert_or_assign(connection_id, conn);
     session->empty_since.reset();
     IDTX_LOG(IDTX_INFO, "Client attached to session {} (now {} clients).",
              session_id, session->clients.size());
@@ -441,12 +547,12 @@ bool SessionManager::IsSingleEditBusy(const std::string& session_id) const
 }
 
 void SessionManager::DetachClient(const std::string& session_id,
-                                  crow::websocket::connection* conn)
+                                  ConnectionId connection_id)
 {
     auto session = Get(session_id);
     if (!session) return;
     std::unique_lock lk(session->clients_mutex);
-    session->clients.erase(conn);
+    session->clients.erase(connection_id);
     if (session->clients.empty())
         session->empty_since = std::chrono::steady_clock::now();
     IDTX_LOG(IDTX_INFO, "Client detached from session {} (now {} clients).",
@@ -454,199 +560,298 @@ void SessionManager::DetachClient(const std::string& session_id,
 }
 
 // ---------------------------------------------------------------------------
-// Stage authoring entrypoint
+// Command submission
 // ---------------------------------------------------------------------------
 
-bool SessionManager::ApplyTransformUpdate(const std::string& session_id,
-                                          const idtxcore::TransformUpdate& upd,
-                                          crow::websocket::connection* origin)
+SessionManager::SubmitStatus SessionManager::Submit(Session& session, SessionCommand command)
 {
+    if (!session.commands) return SubmitStatus::SessionClosing;
+
+    switch (session.commands->TrySubmit(std::move(command)))
+    {
+        case CommandAdmissionStatus::Accepted:  return SubmitStatus::Accepted;
+        case CommandAdmissionStatus::QueueFull: return SubmitStatus::QueueFull;
+        case CommandAdmissionStatus::Stopping:
+        default:                                return SubmitStatus::SessionClosing;
+    }
+}
+
+SessionManager::SubmitStatus SessionManager::SubmitTransformUpdate(
+    const std::string& session_id,
+    std::unique_ptr<const idtxcore::TransformUpdate> update,
+    ConnectionId origin,
+    std::uint64_t request_id) const {
     auto session = Get(session_id);
     if (!session)
     {
-        IDTX_LOG(IDTX_WARN, "ApplyTransformUpdate: unknown session {}.", session_id);
-        return false;
+        IDTX_LOG(IDTX_WARN, "SubmitTransformUpdate: unknown session {}.", session_id);
+        return SubmitStatus::UnknownSession;
+    }
+    if (!update) return SubmitStatus::Accepted; // nothing to apply
+
+    const auto status = Submit(*session, TransformCommand(std::move(update), origin, request_id));
+    if (status == SubmitStatus::QueueFull)
+    {
+        IDTX_LOG(IDTX_WARN, "Session {} command queue is full; rejecting update.", session_id);
+    }
+    return status;
+}
+
+SessionManager::SubmitStatus SessionManager::RequestJoinSnapshot(
+    const std::string& session_id,
+    ConnectionId connection_id)
+{
+    auto session = Get(session_id);
+    if (!session) return SubmitStatus::UnknownSession;
+    return Submit(*session, JoinCommand{connection_id});
+}
+
+// ---------------------------------------------------------------------------
+// Command processing (runs on the session's consumer)
+// ---------------------------------------------------------------------------
+
+void SessionManager::ProcessCommand(Session& session, SessionCommand&& command)
+{
+    try
+    {
+        std::visit([this, &session](auto& cmd) { HandleCommand(session, cmd); }, command);
+    }
+    catch (const std::exception& e)
+    {
+        IDTX_LOG(IDTX_ERROR, "Command failed in session {}: {}", session.id, e.what());
+    }
+    catch (...)
+    {
+        IDTX_LOG(IDTX_ERROR, "Command failed in session {} (unknown exception).", session.id);
+    }
+}
+
+void SessionManager::HandleCommand(Session& session, TransformCommand& command)
+{
+    bool ok = false;
+    session.current_origin.store(command.origin, std::memory_order_relaxed);
+    try
+    {
+        ok = TransformDispatcher::Apply(session.stage, *command.update);
+    }
+    catch (const std::exception& e)
+    {
+        IDTX_LOG(IDTX_ERROR, "TransformUpdate threw in session {}: {}", session.id, e.what());
+    }
+    session.current_origin.store(0, std::memory_order_relaxed);
+
+    // Mark the session dirty so the SessionFlusher persists the session layer
+    // to its sidecar on its next tick.
+    if (ok) session.dirty.store(true, std::memory_order_relaxed);
+
+    // The Ack is sent after the broadcasts triggered by this update, and its
+    // server_seq reflects the state after the update.
+    SendToConnection(session, command.origin,
+                     SerializeAck(session, command.request_id, ok, "apply_failed"));
+}
+
+void SessionManager::HandleCommand(Session& session, JoinCommand& command)
+{
+    if (!session.stage) return;
+
+    const std::uint64_t seq = session.server_seq.load();
+
+    std::vector<std::string> frames;
+    const pxr::SdfLayerHandle session_layer = session.stage->GetSessionLayer();
+    if (session_layer)
+    {
+        // Gather every prim path with an authored spec in the session
+        // (sidecar) layer. These are exactly the prims a late joiner would
+        // otherwise miss, since they are absent from the on-disk root file.
+        std::set<pxr::SdfPath> prim_paths;
+        session_layer->Traverse(
+            pxr::SdfPath::AbsoluteRootPath(),
+            [&prim_paths](const pxr::SdfPath& p)
+            {
+                if (p.IsPrimPath())          prim_paths.insert(p);
+                else if (p.IsPropertyPath()) prim_paths.insert(p.GetPrimPath());
+            });
+
+        for (const auto& p : prim_paths)
+        {
+            std::string payload;
+            if (BuildBroadcastPayload(session, p.GetString(), seq, payload))
+                frames.push_back(std::move(payload));
+        }
     }
 
-    bool ok = false;
+    // Terminal marker: the client now has the full server state as of seq.
+    idtxcore::BaseMessage done;
+    done.set_session_id(session.id);
+    done.set_server_seq(seq);
+    done.mutable_snapshot_complete();
+    std::string done_payload;
+    if (done.SerializeToString(&done_payload)) frames.push_back(std::move(done_payload));
+
     {
-        std::lock_guard lk(session->stage_mutex);
-        session->last_origin = origin;
-        ok = TransformDispatcher::Apply(session->stage, upd);
-        if (!ok) session->last_origin = nullptr;
+        std::shared_lock lk(session.clients_mutex);
+        auto it = session.clients.find(command.connection);
+        if (it == session.clients.end()) return; // left before the snapshot ran
+        for (const auto& f : frames) it->second->send_binary(f);
     }
-    // Mark the session dirty so the SessionFlusher persists the session layer
-    // to its sidecar on its next tick. Set outside the stage_mutex critical
-    // section (atomic) — the flusher takes the mutex itself when it saves.
-    if (ok) session->dirty.store(true, std::memory_order_relaxed);
-    return ok;
+
+    IDTX_LOG(IDTX_INFO, "Sent join snapshot ({} prim frame(s)) to a client of session {}.",
+             frames.size() - 1, session.id);
+}
+
+void SessionManager::HandleCommand(Session& session, CommitCommand& command)
+{
+    CommitResult result = CommitOverrides(session);
+    if (result.status == CommitStatus::Ok)
+    {
+        IDTX_LOG(IDTX_INFO, "Committed session {} to '{}'.", session.id, session.usd_file);
+
+        // Let every live session bound to the same file observe the new
+        // baseline (mirrors the upload-replacement reload path). Only queues
+        // commands, so this is safe from the consumer.
+        ReloadSessionsForFile(session.usd_file);
+    }
+    command.result.set_value(std::move(result));
+}
+
+void SessionManager::HandleCommand(Session& session, ReloadCommand& /*command*/)
+{
+    if (!session.stage) return;
+
+    const pxr::SdfLayerHandle root_layer = session.stage->GetRootLayer();
+    if (!root_layer)
+    {
+        IDTX_LOG(IDTX_WARN, "Reload: session {} has no root layer; skipping.", session.id);
+        return;
+    }
+
+    std::lock_guard shared_layer_lock(m_shared_layer_mutex_);
+
+    // Signal to StageNoticeListener that the imminent
+    // UsdNotice::ObjectsChanged is a reload, not a client-authored change,
+    // so the listener can consult the session layer to decide whether the
+    // reload is visible to attached clients. The notice fires synchronously
+    // when the change block closes, so the flag can be cleared right after.
+    session.reload_in_progress.store(true, std::memory_order_relaxed);
+    session.current_origin.store(0, std::memory_order_relaxed);
+
+    bool ok = false;
+    try
+    {
+        pxr::SdfChangeBlock block;
+        ok = root_layer->Reload(/*force=*/true);
+    }
+    catch (const std::exception& e)
+    {
+        IDTX_LOG(IDTX_ERROR,
+                 "SdfLayer::Reload threw for session {} ('{}'): {}",
+                 session.id, session.usd_file, e.what());
+    }
+    session.reload_in_progress.store(false, std::memory_order_relaxed);
+
+    if (ok)
+        IDTX_LOG(IDTX_INFO, "Reloaded root layer for session {} ('{}').",
+                 session.id, session.usd_file);
+    else
+        IDTX_LOG(IDTX_DEBUG, "SdfLayer::Reload reported no change for session {} ('{}').",
+                 session.id, session.usd_file);
+}
+
+void SessionManager::HandleCommand(Session& session, FlushCommand& /*command*/)
+{
+    if (!session.stage) return;
+    // Clear the flag before saving so an update applied after this flush is
+    // picked up by the next one.
+    if (!session.dirty.exchange(false, std::memory_order_relaxed)) return;
+
+    try
+    {
+        auto sl = session.stage->GetSessionLayer();
+        if (sl && !sl->Save())
+        {
+            IDTX_LOG(IDTX_WARN,
+                     "Flush: SdfLayer::Save() reported failure for session {} ('{}').",
+                     session.id, session.sidecar_path.string());
+            session.dirty.store(true, std::memory_order_relaxed); // retry next tick
+        }
+    }
+    catch (const std::exception& e)
+    {
+        IDTX_LOG(IDTX_ERROR, "Flush threw for session {}: {}", session.id, e.what());
+        session.dirty.store(true, std::memory_order_relaxed);
+    }
+}
+
+CommitResult SessionManager::CommitOverrides(Session& session)
+{
+    CommitResult result;
+    if (!session.stage)
+    {
+        result.status = CommitStatus::UnknownSession;
+        result.error  = "unknown session";
+        return result;
+    }
+
+    const pxr::SdfLayerHandle session_layer = session.stage->GetSessionLayer();
+    if (!session_layer || session_layer->IsEmpty())
+    {
+        result.status = CommitStatus::NothingToCommit;
+        result.error  = "no authored overrides to commit";
+        return result;
+    }
+
+    std::lock_guard shared_layer_lock(m_shared_layer_mutex_);
+
+    // Best-effort persist of the sidecar so its on-disk state matches what
+    // we are about to fold into the original file.
+    session_layer->Save();
+    if (!StageCommitter::Commit(session.stage, session.usd_file_absolute.string(), result.error))
+    {
+        result.status = CommitStatus::WriteFailed;
+        return result;
+    }
+
+    session.dirty.store(false, std::memory_order_relaxed);
+    result.status = CommitStatus::Ok;
+    return result;
+}
+
+void SessionManager::SendToConnection(const Session& session,
+                                      ConnectionId connection_id,
+                                      const std::string& payload)
+{
+    if (connection_id == 0 || payload.empty()) return;
+    std::shared_lock lk(session.clients_mutex);
+    auto it = session.clients.find(connection_id);
+    if (it != session.clients.end()) it->second->send_binary(payload);
 }
 
 // ---------------------------------------------------------------------------
 // Broadcast
 // ---------------------------------------------------------------------------
 
-namespace
-{
-
-bool ReadResolvedTransform(const pxr::UsdStageRefPtr& stage,
-                           const std::string& prim_path_str,
-                           idtxcore::SeparateTransform& out_sep,
-                           idtxcore::Matrix4dTransform& out_mat,
-                           bool& out_use_matrix)
-{
-    if (!stage || !pxr::SdfPath::IsValidPathString(prim_path_str)) return false;
-    pxr::UsdPrim prim = stage->GetPrimAtPath(pxr::SdfPath(prim_path_str));
-    if (!prim) return false;
-
-    pxr::UsdGeomXformable xformable(prim);
-    if (!xformable) return false;
-
-    pxr::UsdGeomXformCommonAPI api(prim);
-    if (api)
-    {
-        pxr::GfVec3d t;
-        pxr::GfVec3f r;
-        pxr::GfVec3f s;
-        pxr::GfVec3f pivot;
-        pxr::UsdGeomXformCommonAPI::RotationOrder order;
-        if (api.GetXformVectorsByAccumulation(&t, &r, &s, &pivot, &order,
-                                              pxr::UsdTimeCode::Default()))
-        {
-            out_sep.mutable_translation()->set_x(t[0]);
-            out_sep.mutable_translation()->set_y(t[1]);
-            out_sep.mutable_translation()->set_z(t[2]);
-            out_sep.mutable_rotation()->set_x(r[0]);
-            out_sep.mutable_rotation()->set_y(r[1]);
-            out_sep.mutable_rotation()->set_z(r[2]);
-            out_sep.mutable_scale()->set_x(s[0]);
-            out_sep.mutable_scale()->set_y(s[1]);
-            out_sep.mutable_scale()->set_z(s[2]);
-            out_use_matrix = false;
-            return true;
-        }
-    }
-
-    pxr::GfMatrix4d local(1.0);
-    bool resets = false;
-    if (!xformable.GetLocalTransformation(&local, &resets, pxr::UsdTimeCode::Default()))
-        return false;
-
-    out_mat.set_m00(local[0][0]); out_mat.set_m01(local[0][1]); out_mat.set_m02(local[0][2]); out_mat.set_m03(local[0][3]);
-    out_mat.set_m10(local[1][0]); out_mat.set_m11(local[1][1]); out_mat.set_m12(local[1][2]); out_mat.set_m13(local[1][3]);
-    out_mat.set_m20(local[2][0]); out_mat.set_m21(local[2][1]); out_mat.set_m22(local[2][2]); out_mat.set_m23(local[2][3]);
-    out_mat.set_m30(local[3][0]); out_mat.set_m31(local[3][1]); out_mat.set_m32(local[3][2]); out_mat.set_m33(local[3][3]);
-    out_use_matrix = true;
-    return true;
-}
-
-/// Build a serialized BaseMessage(xform_broadcast) for @p prim_path from the
-/// resolved transform on @p session's stage. Returns false when the prim has no
-/// readable transform. Shared by the live broadcast and the join snapshot.
-bool BuildBroadcastPayload(const std::shared_ptr<Session>& session,
-                           const std::string& prim_path,
-                           std::string& out_payload)
-{
-    idtxcore::SeparateTransform sep;
-    idtxcore::Matrix4dTransform mat;
-    bool use_matrix = false;
-    if (!ReadResolvedTransform(session->stage, prim_path, sep, mat, use_matrix))
-        return false;
-
-    idtxcore::BaseMessage msg;
-    msg.set_session_id(session->id);
-    auto* bcast = msg.mutable_xform_broadcast();
-    bcast->set_client_id(""); // server-originated
-
-    auto* upd = bcast->mutable_update();
-    upd->set_session_id(session->id);
-    upd->set_usd_file(session->usd_file);
-    upd->set_prim_path(prim_path);
-    upd->set_timestamp(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
-    if (use_matrix) *upd->mutable_matrix()   = std::move(mat);
-    else            *upd->mutable_seperate() = std::move(sep);
-
-    return msg.SerializeToString(&out_payload);
-}
-
-} // namespace
-
-void SessionManager::BroadcastResolvedTransform(const std::shared_ptr<Session>& session,
+void SessionManager::BroadcastResolvedTransform(const Session& session,
                                                 const std::string& prim_path,
-                                                crow::websocket::connection* origin)
+                                                ConnectionId origin,
+                                                std::uint64_t server_seq)
 {
-    if (!session || !session->stage) return;
+    if (!session.stage) return;
 
     std::string payload;
-    if (!BuildBroadcastPayload(session, prim_path, payload))
+    if (!BuildBroadcastPayload(session, prim_path, server_seq, payload))
     {
         IDTX_LOG(IDTX_DEBUG, "Skip broadcast: cannot read transform on '{}'.", prim_path);
         return;
     }
 
-    // Snapshot the client list under shared lock so we don't keep the lock
-    // while sending (which could deadlock with detach paths).
-    std::vector<crow::websocket::connection*> targets;
+    // send_binary only queues the frame on the connection's io thread, so it
+    // is cheap to call under the shared lock, and holding the lock keeps a
+    // concurrently closing connection registered until the call returns.
+    std::shared_lock lk(session.clients_mutex);
+    for (const auto& [id, conn] : session.clients)
     {
-        std::shared_lock lk(session->clients_mutex);
-        targets.reserve(session->clients.size());
-        for (auto* c : session->clients)
-        {
-            if (c != origin) targets.push_back(c);
-        }
+        if (id != origin) conn->send_binary(payload);
     }
-    for (auto* c : targets) c->send_binary(payload);
-}
-
-void SessionManager::SendJoinSnapshot(const std::shared_ptr<Session>& session,
-                                      crow::websocket::connection* conn)
-{
-    if (!session || !session->stage || !conn) return;
-
-    // Collect the serialized broadcast frames under stage_mutex (the reads
-    // touch the composed stage), then send outside the lock so a slow socket
-    // write cannot stall concurrent authoring.
-    std::vector<std::string> frames;
-    {
-        std::lock_guard lk(session->stage_mutex);
-        const pxr::SdfLayerHandle session_layer = session->stage->GetSessionLayer();
-        if (session_layer)
-        {
-            // Gather every prim path with an authored spec in the session
-            // (sidecar) layer — these are exactly the prims a late joiner would
-            // otherwise miss, since they are absent from the on-disk root file.
-            std::set<pxr::SdfPath> prim_paths;
-            session_layer->Traverse(
-                pxr::SdfPath::AbsoluteRootPath(),
-                [&prim_paths](const pxr::SdfPath& p)
-                {
-                    if (p.IsPrimPath())          prim_paths.insert(p);
-                    else if (p.IsPropertyPath()) prim_paths.insert(p.GetPrimPath());
-                });
-
-            for (const auto& p : prim_paths)
-            {
-                std::string payload;
-                if (BuildBroadcastPayload(session, p.GetString(), payload))
-                    frames.push_back(std::move(payload));
-            }
-        }
-    }
-
-    for (const auto& f : frames) conn->send_binary(f);
-
-    // Terminal marker: the client now has the full current server state.
-    idtxcore::BaseMessage done;
-    done.set_session_id(session->id);
-    done.mutable_snapshot_complete();
-    std::string done_payload;
-    if (done.SerializeToString(&done_payload))
-        conn->send_binary(done_payload);
-
-    IDTX_LOG(IDTX_INFO, "Sent join snapshot ({} prim frame(s)) to a client of session {}.",
-             frames.size(), session->id);
 }
 
 SessionManager::CommitStatus SessionManager::CommitSession(const std::string& session_id,
@@ -659,33 +864,39 @@ SessionManager::CommitStatus SessionManager::CommitSession(const std::string& se
         return CommitStatus::UnknownSession;
     }
 
-    bool committed = false;
+    CommitCommand command;
+    std::future<CommitResult> future = command.result.get_future();
+
+    const auto status = Submit(*session, std::move(command));
+    if (status != SubmitStatus::Accepted)
     {
-        std::lock_guard lk(session->stage_mutex);
-        const pxr::SdfLayerHandle session_layer = session->stage->GetSessionLayer();
-        if (!session_layer || session_layer->IsEmpty())
-        {
-            out_error = "no authored overrides to commit";
-            return CommitStatus::NothingToCommit;
-        }
-        // Best-effort persist of the sidecar so its on-disk state matches what
-        // we are about to fold into the original file.
-        session_layer->Save();
-        committed = StageCommitter::Commit(
-            session->stage, session->usd_file_absolute.string(), out_error);
+        out_error = status == SubmitStatus::QueueFull
+            ? "session command queue is full"
+            : "session is closing";
+        return CommitStatus::Unavailable;
     }
 
-    if (!committed) return CommitStatus::WriteFailed;
+    if (future.wait_for(kCommitTimeout) != std::future_status::ready)
+    {
+        // The commit stays queued and still runs; only the caller gives up.
+        out_error = "commit did not complete in time";
+        IDTX_LOG(IDTX_WARN, "Commit of session {} timed out after {}s.",
+                 session_id, static_cast<long long>(kCommitTimeout.count()));
+        return CommitStatus::Unavailable;
+    }
 
-    session->dirty.store(false, std::memory_order_relaxed);
-
-    // Let other live sessions bound to the same file observe the new baseline
-    // (mirrors the upload-replacement reload path). Runs without the current
-    // session's stage_mutex held, so no self-deadlock.
-    ReloadSessionsForFile(session->usd_file);
-
-    IDTX_LOG(IDTX_INFO, "Committed session {} to '{}'.", session_id, session->usd_file);
-    return CommitStatus::Ok;
+    try
+    {
+        CommitResult result = future.get();
+        out_error = std::move(result.error);
+        return result.status;
+    }
+    catch (const std::future_error&)
+    {
+        // The handler failed before producing a result; it logged the cause.
+        out_error = "commit failed";
+        return CommitStatus::WriteFailed;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -716,14 +927,6 @@ nlohmann::json SessionManager::ToJson(const Session& session)
     };
 }
 
-void SessionManager::DestroyLocked(const std::string& id)
-{
-    auto it = m_sessions_.find(id);
-    if (it == m_sessions_.end()) return;
-    if (it->second && it->second->listener) it->second->listener->Revoke();
-    m_sessions_.erase(it);
-}
-
 // ---------------------------------------------------------------------------
 // Idle-session reaper
 // ---------------------------------------------------------------------------
@@ -748,8 +951,8 @@ std::size_t SessionManager::ReapIdleSessions()
             {
                 // Holding m_mutex_ exclusively means no AttachClient/DetachClient
                 // can pass Get() (which needs a shared lock on m_mutex_), so the
-                // emptiness reading below is stable through the erase — no
-                // check-then-act race with a client reconnecting.
+                // emptiness reading below is stable through the erase (no
+                // check-then-act race with a client reconnecting).
                 std::shared_lock clk(session->clients_mutex);
                 idle = session->clients.empty()
                        && session->empty_since
@@ -782,38 +985,15 @@ std::size_t SessionManager::ReapIdleSessions()
 std::size_t SessionManager::FlushDirtySessions()
 {
     const auto sessions = List();
-    std::size_t saved = 0;
+    std::size_t submitted = 0;
     for (const auto& session : sessions)
     {
-        if (!session || !session->stage) continue;
-        // Only exchange (and pay the Save cost) when there is pending work.
-        // Clear the flag *before* saving so a concurrent author that sets it
-        // again during the save is not lost: it will be picked up next tick.
-        if (!session->dirty.exchange(false, std::memory_order_relaxed))
-            continue;
-
-        try
-        {
-            std::lock_guard lk(session->stage_mutex);
-            if (auto sl = session->stage->GetSessionLayer())
-            {
-                if (sl->Save()) ++saved;
-                else
-                {
-                    IDTX_LOG(IDTX_WARN,
-                             "Flush: SdfLayer::Save() reported failure for session {} ('{}').",
-                             session->id, session->sidecar_path.string());
-                    session->dirty.store(true, std::memory_order_relaxed); // retry next tick
-                }
-            }
-        }
-        catch (const std::exception& e)
-        {
-            IDTX_LOG(IDTX_ERROR, "Flush threw for session {}: {}", session->id, e.what());
-            session->dirty.store(true, std::memory_order_relaxed);
-        }
+        // Only queue work when there is something to save. The consumer
+        // re-checks and clears the flag.
+        if (!session || !session->dirty.load(std::memory_order_relaxed)) continue;
+        if (Submit(*session, FlushCommand{}) == SubmitStatus::Accepted) ++submitted;
     }
-    return saved;
+    return submitted;
 }
 
 void SessionManager::ReaperRun()

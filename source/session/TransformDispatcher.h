@@ -30,7 +30,8 @@ public:
     /**
      * @brief Apply a TransformUpdate to the given stage.
      *
-     * The caller MUST hold the session's stage_mutex.
+     * Must be called from the session's command consumer, which has
+     * exclusive access to the stage.
      *
      * @return true if the change was applied successfully, false if the prim
      *         could not be located or the message was malformed. The function

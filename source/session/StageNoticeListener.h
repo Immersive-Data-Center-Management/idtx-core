@@ -11,10 +11,12 @@
  * reads the resolved transform back from the stage, and asks
  * SessionManager to broadcast it.
  *
- * Origin suppression is achieved through a transient `last_origin`
- * pointer set on the Session by SessionManager::ApplyTransformUpdate
- * before the actual authoring takes place. The listener consults that
- * field to skip echoing the change back to the originating client.
+ * Notices are delivered on the thread that authored the change, which is the
+ * session's command consumer. Origin suppression uses Session::current_origin,
+ * which the consumer sets while it applies a client's TransformUpdate; the
+ * listener skips echoing the change back to that connection. Every notice
+ * that affects at least one prim advances Session::server_seq once, and all
+ * broadcasts for that notice carry the new value.
  */
 #pragma once
 

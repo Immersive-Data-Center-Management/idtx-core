@@ -71,7 +71,7 @@ void CloseAllWebSocketConnections(idtx::session::SessionManager& manager)
         {
             std::shared_lock lk(session->clients_mutex);
             conns.reserve(session->clients.size());
-            for (auto* c : session->clients) conns.push_back(c);
+            for (const auto& [id, c] : session->clients) conns.push_back(c);
         }
         for (auto* c : conns)
         {

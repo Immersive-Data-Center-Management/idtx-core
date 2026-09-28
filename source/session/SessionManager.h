@@ -8,8 +8,22 @@
  *   - validate the requested USD file using utils::UsdFileLocator
  *   - open the UsdStage and register a TfNotice listener (Variant B)
  *   - track connected websocket clients per session
- *   - serialize stage writes through Session::stage_mutex
+ *   - turn every stage access into a SessionCommand and process each
+ *     session's commands serially on a shared WorkerExecutor
  *   - perform per-session broadcast (called from the listener)
+ *
+ * Threading model: producers (websocket io threads, REST handlers, the
+ * flusher and the reaper) only submit commands, which never blocks. Each
+ * session's commands are executed one at a time, in submission order, by the
+ * session's consumer. All stage reads and writes, and all per-session
+ * outbound frames (acks, broadcasts, snapshots), happen on that consumer.
+ *
+ * Known limitation: sessions opened on the same USD file share the root
+ * SdfLayer through the USD layer registry. Reloading or committing that layer
+ * from one session's consumer also delivers change notices to the other
+ * sessions' stages on that thread. Operations that mutate the shared layer
+ * are serialized across sessions, but a concurrent read on another session's
+ * consumer is not.
  */
 #pragma once
 
@@ -31,10 +45,12 @@
 #include <idtx/utils/Logger.h>
 
 #include "Session.h"
+#include "SessionCommand.h"
 #include "dto/SessionDto.h"
 #include "utils/UsdFileLocator.h"
 
 namespace idtxcore { class TransformUpdate; }
+namespace idtx::concurrency { class WorkerExecutor; }
 
 namespace idtx
 {
@@ -64,9 +80,12 @@ public:
      *        before the background reaper destroys it. A value of 0 (the
      *        default) disables the reaper entirely, so sessions persist until an
      *        explicit Destroy() or manager shutdown.
+     * @param worker_count  Number of worker threads shared by all sessions to
+     *        process their commands. Values below 1 are raised to 1.
      */
     explicit SessionManager(idtx::utils::UsdFileLocator file_locator,
-                            std::chrono::seconds idle_timeout = std::chrono::seconds{0});
+                            std::chrono::seconds idle_timeout = std::chrono::seconds{0},
+                            std::size_t worker_count = 1);
     ~SessionManager();
 
     SessionManager(const SessionManager&)            = delete;
@@ -92,6 +111,12 @@ public:
     std::shared_ptr<Session> Get(const std::string& id) const;
     std::vector<std::shared_ptr<Session>> List() const;
     bool Exists(const std::string& id) const;
+
+    /**
+     * @brief Remove the session, let its already queued commands finish, then
+     *        tear it down. Blocks until the session's consumer is idle. Must
+     *        not be called from a command handler.
+     */
     bool Destroy(const std::string& id);
 
     /**
@@ -100,7 +125,7 @@ public:
      *        when the session was created).
      *
      * Walks @c m_sessions_ under a shared lock; session counts are small
-     * and this is only called on upload replacement.
+     * and this is only called on upload replacement and commit.
      *
      * @param usd_file  Uploads-relative path to look up.
      * @return All matching sessions, or an empty vector when none exist.
@@ -108,28 +133,28 @@ public:
     std::vector<std::shared_ptr<Session>> FindByUsdFile(const std::string& usd_file) const;
 
     /**
-     * @brief Reload the root layer of every live session whose
-     *        @c usd_file matches @p usd_file, in response to an on-disk
-     *        replacement of the backing file.
+     * @brief Ask every live session whose @c usd_file matches @p usd_file to
+     *        reload its root layer, in response to an on-disk replacement of
+     *        the backing file.
      *
-     * For each affected session the manager:
-     *   1. acquires the session's @c stage_mutex,
-     *   2. sets @c Session::reload_in_progress = true so
-     *      @c StageNoticeListener can distinguish the reload notice from
-     *      a normal authoring notice,
-     *   3. issues @c SdfLayer::Reload(force=true) on the stage's root
+     * Submits one reload command per session and returns immediately. Each
+     * command runs on the session's consumer, in order with the session's
+     * other commands:
+     *   1. sets @c Session::reload_in_progress so @c StageNoticeListener can
+     *      distinguish the reload notice from a normal authoring notice,
+     *   2. issues @c SdfLayer::Reload(force=true) on the stage's root
      *      layer inside a @c SdfChangeBlock so a single notice is fired,
-     *   4. relies on the listener to broadcast the surviving changes to
-     *      attached clients — the listener drops broadcasts for any
+     *   3. relies on the listener to broadcast the surviving changes to
+     *      attached clients. The listener drops broadcasts for any
      *      attribute whose session-layer opinion still wins by
-     *      composition strength
+     *      composition strength.
      *
-     * Safe to call from any thread. Failures inside a single session are
-     * logged but do not affect other sessions.
+     * Safe to call from any thread, including a command handler. Failures
+     * inside a single session are logged but do not affect other sessions.
      *
      * @param usd_file  Uploads-relative path of the file that was just
      *                  replaced on disk.
-     * @return Number of sessions the manager asked to reload.
+     * @return Number of sessions that accepted the reload command.
      */
     std::size_t ReloadSessionsForFile(const std::string& usd_file);
 
@@ -147,10 +172,17 @@ public:
         SingleEditBusy
     };
 
+    /**
+     * @brief Register @p conn under @p connection_id with the session.
+     *
+     * @p connection_id must not be reused while the session exists. It is
+     * what commands carry to refer to the connection.
+     */
     AttachStatus AttachClient(const std::string& session_id,
+                              ConnectionId connection_id,
                               crow::websocket::connection* conn);
     void DetachClient(const std::string& session_id,
-                      crow::websocket::connection* conn);
+                      ConnectionId connection_id);
 
     /**
      * @brief Returns true if the session exists, is in SingleEdit mode and
@@ -162,59 +194,78 @@ public:
     bool IsSingleEditBusy(const std::string& session_id) const;
 
     // ------------------------------------------------------------------
-    // Stage authoring entrypoint (called by WebSocketController)
+    // Command submission (called by WebSocketController)
     // ------------------------------------------------------------------
 
     /**
-     * @brief Apply a TransformUpdate to the session's stage. Mutates the
-     *        stage under stage_mutex. The TfNotice listener will pick the
-     *        change up and trigger a broadcast (Variant B).
+     * @brief Outcome of submitting a command to a session.
      */
-    bool ApplyTransformUpdate(const std::string& session_id,
-                              const idtxcore::TransformUpdate& upd,
-                              crow::websocket::connection* origin);
+    enum class SubmitStatus
+    {
+        Accepted,
+        UnknownSession,
+        QueueFull,      // the session's queue is full; retry later
+        SessionClosing  // the session is being destroyed
+    };
+
+    /**
+     * @brief Queue a TransformUpdate for the session's consumer.
+     *
+     * Never blocks. When accepted, the consumer applies the update, the
+     * TfNotice listener broadcasts the result to every other client, and
+     * @p origin receives an Ack carrying @p request_id. When not accepted,
+     * no Ack is sent; the caller is responsible for reporting the failure.
+     */
+    SubmitStatus SubmitTransformUpdate(const std::string& session_id,
+                                       std::unique_ptr<const idtxcore::TransformUpdate> update,
+                                       ConnectionId origin,
+                                       std::uint64_t request_id) const;
+
+    /**
+     * @brief Queue a join snapshot for a freshly attached connection.
+     *
+     * The consumer pushes the current server-side stage state to
+     * @p connection_id so a late joiner is not left with a stale
+     * REST-fetched file: one @c kXformBroadcast per prim with authored
+     * opinions in the session (sidecar) layer, then a terminal
+     * @c kSnapshotComplete frame. Because it runs in order with all other
+     * commands, the snapshot is consistent with the broadcasts that follow.
+     */
+    SubmitStatus RequestJoinSnapshot(const std::string& session_id,
+                                     ConnectionId connection_id);
 
     // ------------------------------------------------------------------
-    // Broadcast (invoked from StageNoticeListener)
+    // Broadcast (invoked from StageNoticeListener on the consumer)
     // ------------------------------------------------------------------
 
     /**
      * @brief Broadcast a TransformBroadcast for a single prim path to all
      *        connected clients of @p session, except @p origin.
-     *        Reads the resolved transform from the stage at default time.
+     *        Reads the resolved transform from the stage at default time and
+     *        stamps the frame with @p server_seq.
      */
-    void BroadcastResolvedTransform(const std::shared_ptr<Session>& session,
+    void BroadcastResolvedTransform(const Session& session,
                                     const std::string& prim_path,
-                                    crow::websocket::connection* origin);
+                                    ConnectionId origin,
+                                    std::uint64_t server_seq);
 
-    /**
-     * @brief Push the current server-side stage state to a single freshly
-     *        joined connection so a late joiner is not left with a stale
-     *        REST-fetched file. Iterates the prims with authored opinions in
-     *        the session (sidecar) layer, unicasts one @c kXformBroadcast per
-     *        prim to @p conn, then a terminal @c kSnapshotComplete frame.
-     *        Safe to call after AttachClient; takes the session's stage_mutex
-     *        briefly for the resolved-transform reads.
-     */
-    void SendJoinSnapshot(const std::shared_ptr<Session>& session,
-                          crow::websocket::connection* conn);
+    using CommitStatus = idtx::session::CommitStatus;
 
-    /**
-     * @brief Outcome of a commit request.
-     */
-    enum class CommitStatus
-    {
-        Ok,
-        UnknownSession,
-        NothingToCommit,
-        WriteFailed
-    };
+    /// How long CommitSession() waits for the session's consumer.
+    static constexpr std::chrono::seconds kCommitTimeout{30};
 
     /**
      * @brief Merge the session's sidecar overrides back into the original USD
      *        file (preserving composition arcs via UsdUtilsFlattenLayerStack),
-     *        then reload other live sessions bound to the same file. Does not
-     *        destroy the session. Safe to call from the REST thread.
+     *        then ask every live session bound to the same file to reload.
+     *        Does not destroy the session.
+     *
+     * The commit is queued behind every command the session has already
+     * accepted, so it contains all previously acknowledged updates. Blocks
+     * the calling thread for at most kCommitTimeout and returns
+     * CommitStatus::Unavailable if the commit could not be queued or did not
+     * finish in time. Safe to call from the REST thread; must not be called
+     * from a command handler.
      */
     CommitStatus CommitSession(const std::string& session_id, std::string& out_error);
 
@@ -237,31 +288,59 @@ public:
     std::size_t ReapIdleSessions();
 
     /**
-     * @brief Save the session (sidecar) layer of every session currently
-     *        flagged dirty, clearing the flag on success. Each save is done
-     *        under the session's stage_mutex so it never races client-driven
-     *        authoring. Driven by the background SessionFlusher; exposed so
-     *        tests can trigger a flush deterministically. Returns the number of
-     *        sessions actually saved.
+     * @brief Queue a flush command for every session currently flagged
+     *        dirty. The consumer saves the session (sidecar) layer and clears
+     *        the flag on success, so the save never races client-driven
+     *        authoring. Driven by the background SessionFlusher. Returns the
+     *        number of flush commands accepted.
      */
     std::size_t FlushDirtySessions();
 
 private:
-    void DestroyLocked(const std::string& id);
+    /// Submit @p command to @p session and map the admission result.
+    static SubmitStatus Submit(Session& session, SessionCommand command);
 
-    /// Revoke @p session's listener and clear its stage's session layer, the
-    /// shared "safe teardown" step used before dropping the last reference.
-    /// Mirrors the ~SessionManager teardown to avoid racing the thumbnail
-    /// worker's SdfLayer::FindOrOpen on the same on-disk path. Does not take
-    /// m_mutex_ itself.
-    static void TeardownSession(const std::shared_ptr<Session>& session);
+    /// Command handler installed on every session's scheduler. Runs on the
+    /// session's consumer.
+    void ProcessCommand(Session& session, SessionCommand&& command);
+
+    void HandleCommand(Session& session, TransformCommand& command);
+    void HandleCommand(Session& session, JoinCommand& command);
+    void HandleCommand(Session& session, CommitCommand& command);
+    void HandleCommand(Session& session, ReloadCommand& command);
+    void HandleCommand(Session& session, FlushCommand& command);
+
+    /// Save the sidecar and fold the session's overrides into the original
+    /// file. Requires exclusive access to the session's stage (the consumer,
+    /// or a teardown after the consumer went idle).
+    CommitResult CommitOverrides(Session& session);
+
+    /// Send @p payload to one connection of @p session, if still attached.
+    static void SendToConnection(const Session& session,
+                                 ConnectionId connection_id,
+                                 const std::string& payload);
+
+    /// Close admission, wait for the session's consumer to finish every
+    /// accepted command, then revoke the listener and clear the stage's
+    /// session layer before the last reference is dropped. Clearing avoids
+    /// racing the thumbnail worker's SdfLayer::FindOrOpen on the same on-disk
+    /// path. Must be called without m_mutex_ held and never from a worker.
+    void TeardownSession(const std::shared_ptr<Session>& session);
 
     /// Background reaper loop: periodically calls ReapIdleSessions() until the
     /// manager is destroyed. Only started when m_idle_timeout_ > 0.
     void ReaperRun();
 
+    // Shared by all sessions' command schedulers, which only hold weak
+    // references. Stopped in the destructor after every session is idle.
+    std::shared_ptr<idtx::concurrency::WorkerExecutor>         m_executor_;
+
+    // Serializes commands that mutate a root layer which may be shared with
+    // other sessions on the same file (reload and commit).
+    std::mutex                                                 m_shared_layer_mutex_;
+
     idtx::utils::UsdFileLocator                                m_locator_;
-    std::filesystem::path                                     m_sessions_dir_;
+    std::filesystem::path                                      m_sessions_dir_;
     mutable std::shared_mutex                                  m_mutex_;
     std::unordered_map<std::string, std::shared_ptr<Session>>  m_sessions_;
 
