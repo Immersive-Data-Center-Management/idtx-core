@@ -71,6 +71,17 @@ checked_out_repo_dir $>scons tests=1
 
 In addition to the `idtx-core` executable this will generate the `idtx-core-tests` executable in the `./bin` folder. Run this executable will execute all defined tests contained in the `tests/` folder.
 
+### Load testing the websocket protocol
+
+`tools/ws_load.py` simulates clients of one collaborative session against a running server and reports ack latency, broadcast fan-out latency, `queue_full` rejections and `server_seq` ordering. The `drag` scenario sends updates at a fixed rate (like a user dragging an object), the `burst` scenario sends a fixed number of updates as fast as possible:
+```bash
+checked_out_repo_dir $>python -m venv .venv
+checked_out_repo_dir $>.venv/Scripts/pip install -r tools/requirements.txt
+checked_out_repo_dir $>.venv/Scripts/python tools/ws_load.py drag --draggers 2 --observers 4 --rate 120 --duration 10
+checked_out_repo_dir $>.venv/Scripts/python tools/ws_load.py burst --draggers 1 --count 5000
+```
+(On Linux/macOS use `.venv/bin/` instead of `.venv/Scripts/`.) The script generates its protobuf modules with the `protoc` of the vcpkg install, uploads a small cube scene and deletes its session afterwards. Pass `--token` (or set `IDTX_TOKEN`) when authentication is enabled.
+
 ### Current Available Endpoints
 
 | Path                               | Authentication | Methods | Description |
@@ -163,6 +174,21 @@ Relevant environment variables:
 | `IDTX_UPLOAD_MAX_BYTES`    | `524288000`    | Maximum accepted upload size in bytes (500 MiB). |
 | `IDTX_THUMBNAIL_ENABLED`   | `true`         | Set to `false`/`0` to disable thumbnail generation entirely. |
 | `IDTX_THUMBNAIL_SIZE`      | `256`          | Pixel edge length of the generated thumbnail (square). |
+
+#### Real-time session protocol
+
+Clients join a session via a websocket at `/ws?sid=<session id>` and exchange binary `idtxcore.BaseMessage` protobuf frames (see `shared/proto_messages/`).
+
+- **Server-authoritative order.** Every session processes its commands (transform updates, joins, commits, reloads) strictly one at a time, in the order the server received them. The resulting order is the same for all clients.
+- **`server_seq`.** A per-session version counter, incremented once for every stage change the server applies. `TransformBroadcast`, `Ack` and `SnapshotComplete` carry the `server_seq` of the state they describe. The values a client receives never go down, but several messages can share one value (an update's `Ack` and its broadcasts, all frames of a join snapshot). `0` means "no state": it is used by messages that do not reflect state and by Acks of rejected updates (`queue_full`, `session_closing`); clients ignore it for ordering.
+- **`request_id`.** Set by the client on each `TransformUpdate` (e.g. a per-connection counter) and echoed in the matching `Ack`. Each update gets exactly one `Ack`, which is sent after the broadcasts the update triggered. Broadcasts are not sent back to the originating client.
+- **Ack errors.** `queue_full` (the session's command queue is full; the update was dropped), `session_closing` (the session is being torn down; the update was dropped) and `apply_failed` (the update could not be applied to the stage).
+- **Join snapshot.** After the `Handshake`, a joining client receives one `TransformBroadcast` per prim with session overrides, followed by `SnapshotComplete`, all carrying the same `server_seq`. Live broadcasts can arrive before the snapshot; the snapshot frames supersede them.
+- **Commit.** `POST /api/v1/sessions/<id>/commit` is queued behind all previously received updates. It answers `200` with `{"committed": true}`, `409 nothing_to_commit`, or `503 unavailable` when the session is shutting down.
+
+| Variable               | Default          | Meaning                                                                                                                        |
+|------------------------|------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| `IDTX_SESSION_WORKERS` | CPU cores, max 4 | Worker threads shared by all sessions to process session commands. A single session never uses more than one worker at a time. |
 
 ## Support, Feedback, Contributing
 
