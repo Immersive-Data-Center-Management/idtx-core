@@ -613,6 +613,8 @@ class BaseMessage final : public ::google::protobuf::Message
   // accessors -------------------------------------------------------
   enum : int {
     kSessionIdFieldNumber = 1,
+    kRequestIdFieldNumber = 8,
+    kServerSeqFieldNumber = 9,
     kHandshakeFieldNumber = 2,
     kXformUpdateFieldNumber = 3,
     kXformBroadcastFieldNumber = 4,
@@ -634,6 +636,26 @@ class BaseMessage final : public ::google::protobuf::Message
   const ::std::string& _internal_session_id() const;
   PROTOBUF_ALWAYS_INLINE void _internal_set_session_id(const ::std::string& value);
   ::std::string* PROTOBUF_NONNULL _internal_mutable_session_id();
+
+  public:
+  // uint64 request_id = 8;
+  void clear_request_id() ;
+  ::uint64_t request_id() const;
+  void set_request_id(::uint64_t value);
+
+  private:
+  ::uint64_t _internal_request_id() const;
+  void _internal_set_request_id(::uint64_t value);
+
+  public:
+  // uint64 server_seq = 9;
+  void clear_server_seq() ;
+  ::uint64_t server_seq() const;
+  void set_server_seq(::uint64_t value);
+
+  private:
+  ::uint64_t _internal_server_seq() const;
+  void _internal_set_server_seq(::uint64_t value);
 
   public:
   // .idtxcore.Handshake handshake = 2;
@@ -764,8 +786,8 @@ class BaseMessage final : public ::google::protobuf::Message
   inline bool has_message() const;
   inline void clear_has_message();
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<0, 7,
-                                   6, 39,
+  static const ::google::protobuf::internal::TcParseTable<4, 9,
+                                   6, 47,
                                    2>
       _table_;
 
@@ -787,6 +809,8 @@ class BaseMessage final : public ::google::protobuf::Message
     ::google::protobuf::internal::HasBits<1> _has_bits_;
     ::google::protobuf::internal::CachedSize _cached_size_;
     ::google::protobuf::internal::ArenaStringPtr session_id_;
+    ::uint64_t request_id_;
+    ::uint64_t server_seq_;
     union MessageUnion {
       constexpr MessageUnion() : _constinit_{} {}
       ::google::protobuf::internal::ConstantInitialized _constinit_;
@@ -1605,6 +1629,56 @@ inline ::idtxcore::SnapshotComplete* PROTOBUF_NONNULL BaseMessage::mutable_snaps
   ::idtxcore::SnapshotComplete* _msg = _internal_mutable_snapshot_complete();
   // @@protoc_insertion_point(field_mutable:idtxcore.BaseMessage.snapshot_complete)
   return _msg;
+}
+
+// uint64 request_id = 8;
+inline void BaseMessage::clear_request_id() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.request_id_ = ::uint64_t{0u};
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000002U);
+}
+inline ::uint64_t BaseMessage::request_id() const {
+  // @@protoc_insertion_point(field_get:idtxcore.BaseMessage.request_id)
+  return _internal_request_id();
+}
+inline void BaseMessage::set_request_id(::uint64_t value) {
+  _internal_set_request_id(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  // @@protoc_insertion_point(field_set:idtxcore.BaseMessage.request_id)
+}
+inline ::uint64_t BaseMessage::_internal_request_id() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.request_id_;
+}
+inline void BaseMessage::_internal_set_request_id(::uint64_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.request_id_ = value;
+}
+
+// uint64 server_seq = 9;
+inline void BaseMessage::clear_server_seq() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.server_seq_ = ::uint64_t{0u};
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000004U);
+}
+inline ::uint64_t BaseMessage::server_seq() const {
+  // @@protoc_insertion_point(field_get:idtxcore.BaseMessage.server_seq)
+  return _internal_server_seq();
+}
+inline void BaseMessage::set_server_seq(::uint64_t value) {
+  _internal_set_server_seq(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  // @@protoc_insertion_point(field_set:idtxcore.BaseMessage.server_seq)
+}
+inline ::uint64_t BaseMessage::_internal_server_seq() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.server_seq_;
+}
+inline void BaseMessage::_internal_set_server_seq(::uint64_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.server_seq_ = value;
 }
 
 inline bool BaseMessage::has_message() const {

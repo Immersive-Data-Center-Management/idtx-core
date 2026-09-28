@@ -3,7 +3,14 @@ syntax = "proto3";
 package idtxcore;
 
 // Generic acknowledgement for client-issued messages.
-// `ref_id` correlates the ack to a previous client message.
+// TODO: `ref_id` is kept for compatibility and is not set by the server; the
+// correlation id is BaseMessage.request_id.
+// Sent exactly once for every TransformUpdate. The enclosing
+// BaseMessage.request_id echoes the update's request_id. When ok is false,
+// error holds one of:
+//   "apply_failed"    - the update was processed but could not be applied
+//   "queue_full"      - the session's command queue is full; retry later
+//   "session_closing" - the session is shutting down; the update was dropped
 message Ack {
     string ref_id = 1;
     bool   ok     = 2;
