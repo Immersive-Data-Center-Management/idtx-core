@@ -182,8 +182,16 @@ public:
     AttachStatus AttachClient(const std::string& session_id,
                               ConnectionId connection_id,
                               crow::websocket::connection* conn);
-    void DetachClient(const std::string& session_id,
-                      ConnectionId connection_id);
+
+    /**
+     * @brief Remove @p connection_id from @p session's client registry.
+     *
+     * Takes the session itself, not its id: a session that is being
+     * destroyed is no longer found by id, but its remaining commands still
+     * send to its clients until the teardown finished, so a closing
+     * connection must still be removed.
+     */
+    void DetachClient(Session& session, ConnectionId connection_id);
 
     /**
      * @brief Returns true if the session exists, is in SingleEdit mode and

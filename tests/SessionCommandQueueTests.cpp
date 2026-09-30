@@ -16,12 +16,15 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "session/Session.h"
+#include "session/SessionManager.h"
 #include "support/HttpTestClient.h"
 #include "support/ProtoHelpers.h"
 #include "support/TestServer.h"
@@ -591,6 +594,41 @@ TEST_CASE("queue: deleting a session with queued updates drains them cleanly")
     CHECK(del.status == 204);
     CHECK(http.Get(server.base_http_url() + "/api/v1/sessions/" + sid).status == 404);
     CHECK(http.Get(server.base_http_url() + "/api/v1/health").status == 200);
+}
+
+TEST_CASE("queue: a client that disconnects after its session was deleted is detached")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "collaborative_edit");
+
+    WsTestClient ws;
+    Join(ws, server, sid);
+
+    // Keep the session object alive past the delete to inspect its clients.
+    const auto session = server.session_manager().Get(sid);
+    REQUIRE(session != nullptr);
+    const auto client_count = [&session] {
+        std::shared_lock lock(session->clients_mutex);
+        return session->clients.size();
+    };
+    REQUIRE(client_count() == 1);
+
+    HttpTestClient http;
+    REQUIRE(http.Delete(server.base_http_url() + "/api/v1/sessions/" + sid).status == 204);
+    // Still attached: the delete does not close websockets.
+    REQUIRE(client_count() == 1);
+
+    // The session is no longer found by id, so the close handler has to
+    // detach through the session itself. A connection left in the registry
+    // would be freed by crow while the session could still send to it.
+    ws.Close();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (client_count() != 0 && std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    CHECK(client_count() == 0);
 }
 
 TEST_CASE("queue: updates are applied even if their sender disconnects right away")

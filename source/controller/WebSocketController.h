@@ -26,7 +26,7 @@
 
 #include "session/SessionCommand.h"
 
-namespace idtx { namespace session { class SessionManager; } }
+namespace idtx { namespace session { class SessionManager; struct Session; } }
 
 class WebSocketController
 {
@@ -40,6 +40,11 @@ class WebSocketController
         // Captured at accept time: querying the socket later throws once it
         // has been closed, e.g. inside the close handler.
         std::string                       remote_ip;
+        // The session this connection is attached to, set once attaching
+        // succeeded. Detaching goes through it rather than the id, because
+        // a deleted session is no longer found by id while it is still
+        // being torn down and sending to its clients.
+        std::weak_ptr<idtx::session::Session> session;
         // One correction request per prim this connection had an update of
         // rejected with queue_full, reused for every later rejection of the
         // same prim. Only touched by the connection's message handler, which

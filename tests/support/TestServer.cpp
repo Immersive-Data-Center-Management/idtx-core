@@ -290,6 +290,11 @@ void TestServer::WaitReady(std::chrono::milliseconds timeout)
     throw std::runtime_error("TestServer failed to become ready at " + url);
 }
 
+idtx::session::SessionManager& TestServer::session_manager() const
+{
+    return *m_ctx_->sessionManager;
+}
+
 std::string TestServer::base_http_url() const
 {
     return "http://" + m_host_ + ":" + std::to_string(m_port_);

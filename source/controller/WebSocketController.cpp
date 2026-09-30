@@ -103,6 +103,7 @@ void WebSocketController::OnOpen(crow::websocket::connection& conn)
         conn.close("session no longer exists");
         return;
     }
+    ws_data->session = session;
 
     // Send a Handshake so the client can fetch the initial state via REST.
     idtxcore::BaseMessage msg;
@@ -152,9 +153,9 @@ void WebSocketController::OnClose(crow::websocket::connection& conn,
     conn.userdata(nullptr);
     if (!ws_data) return;
 
-    if (m_manager_ && !ws_data->session_id.empty())
+    if (auto session = ws_data->session.lock(); session && m_manager_)
     {
-        m_manager_->DetachClient(ws_data->session_id, ws_data->connection_id);
+        m_manager_->DetachClient(*session, ws_data->connection_id);
     }
     IDTX_LOG(IDTX_INFO, "WebSocket connection closed: {} (code={}, reason={}).",
              ws_data->remote_ip, code, reason);

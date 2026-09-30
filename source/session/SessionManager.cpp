@@ -568,17 +568,14 @@ bool SessionManager::IsSingleEditBusy(const std::string& session_id) const
     return !session->clients.empty();
 }
 
-void SessionManager::DetachClient(const std::string& session_id,
-                                  ConnectionId connection_id)
+void SessionManager::DetachClient(Session& session, ConnectionId connection_id)
 {
-    auto session = Get(session_id);
-    if (!session) return;
-    std::unique_lock lk(session->clients_mutex);
-    session->clients.erase(connection_id);
-    if (session->clients.empty())
-        session->empty_since = std::chrono::steady_clock::now();
+    std::unique_lock lk(session.clients_mutex);
+    session.clients.erase(connection_id);
+    if (session.clients.empty())
+        session.empty_since = std::chrono::steady_clock::now();
     IDTX_LOG(IDTX_INFO, "Client detached from session {} (now {} clients).",
-             session_id, session->clients.size());
+             session.id, session.clients.size());
 }
 
 // ---------------------------------------------------------------------------
