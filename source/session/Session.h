@@ -38,6 +38,7 @@
 #include "dto/SessionDto.h"
 #include "SessionCommand.h"
 #include "SessionCommandScheduler.h"
+#include "SessionVersions.h"
 
 namespace idtx
 {
@@ -102,10 +103,15 @@ struct Session
     std::atomic<bool>                                 reload_in_progress{false};
 
     // Per-session state version. Incremented once for every stage change
-    // observed by the listener and stamped on outgoing broadcasts, acks and
+    // observed by the listener and for every correction, and stamped on outgoing broadcasts, acks and
     // snapshots as BaseMessage.server_seq. Atomic for the same reason as
     // current_origin.
     std::atomic<std::uint64_t>                        server_seq{0};
+
+    // Which versions changed which prim and which were sent to which
+    // connection. Used by the consumer to reject updates made on an outdated
+    // state.
+    SessionVersions                                   versions;
 
     // On-disk sidecar layer that backs the stage's session layer. Client
     // edits are authored into the session layer, which is this named file,

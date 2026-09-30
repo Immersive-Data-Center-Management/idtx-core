@@ -187,11 +187,15 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
             // the consumer sends the Ack after applying it. This also doubles
             // as the "you saw your own action" signal in the TfNotice
             // broadcast model, because the listener suppresses the echo to the
-            // origin.
+            // origin. On a client update, server_seq is the update's base.
             const std::uint64_t request_id = msg.request_id();
+            const std::uint64_t base_seq   = msg.server_seq();
             std::unique_ptr<const idtxcore::TransformUpdate> update(msg.release_xform_update());
+            // The update is gone once submitted; keep what a correction needs.
+            const std::string prim_path = update ? update->prim_path() : std::string();
             const auto status = m_manager_->SubmitTransformUpdate(
-                ws_data->session_id, std::move(update), ws_data->connection_id, request_id);
+                ws_data->session_id, std::move(update), ws_data->connection_id, request_id,
+                base_seq);
             if (status == SubmitStatus::Accepted) break;
 
             // Not queued: answer right away so every update gets exactly one
@@ -205,6 +209,10 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
 
             std::string payload;
             if (ack_msg.SerializeToString(&payload)) conn.send_binary(payload);
+
+            // The update was valid but not applied, while the client already
+            // shows it. A closing session needs no correction.
+            if (status == SubmitStatus::QueueFull) RequestCorrection(*ws_data, prim_path);
             break;
         }
         case idtxcore::BaseMessage::kHandshake:
@@ -225,4 +233,13 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
                      ws_data->session_id);
             break;
     }
+}
+
+void WebSocketController::RequestCorrection(WsUserData& ws_data, const std::string& prim_path)
+{
+    if (prim_path.empty()) return;
+
+    auto& request = ws_data.pending_corrections[prim_path];
+    if (!request) request = std::make_shared<idtx::session::PendingCorrection>(prim_path);
+    m_manager_->RequestCorrection(ws_data.session_id, ws_data.connection_id, request);
 }

@@ -174,7 +174,10 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
             }
 
             // No conflicting override: propagate the current resolved
-            // transform, exactly like the normal branch would.
+            // transform, exactly like the normal branch would. Only changes
+            // clients see are recorded, so a suppressed prim does not make
+            // client updates stale.
+            session->versions.RecordChange(prim_path_str, seq, /*writer=*/0);
             m_manager_->BroadcastResolvedTransform(*session, prim_path_str, /*origin=*/0, seq);
         }
         return;
@@ -215,6 +218,7 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
     const std::uint64_t seq = session->server_seq.fetch_add(1) + 1;
     for (const auto& prim_path : affected_prims)
     {
+        session->versions.RecordChange(prim_path, seq, origin);
         m_manager_->BroadcastResolvedTransform(*session, prim_path, origin, seq);
     }
 }

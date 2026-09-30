@@ -16,7 +16,8 @@
  * which the consumer sets while it applies a client's TransformUpdate; the
  * listener skips echoing the change back to that connection. Every notice
  * that affects at least one prim advances Session::server_seq once, and all
- * broadcasts for that notice carry the new value.
+ * broadcasts for that notice carry the new value. Every broadcast prim is
+ * recorded in Session::versions with that value and the origin as writer.
  */
 #pragma once
 

@@ -30,6 +30,16 @@ message SnapshotComplete {
 //     broadcasts, all frames of a join snapshot). 0 means "no state": it is
 //     used by messages that do not reflect state and by Acks of rejected
 //     updates (queue_full, session_closing); clients ignore it for ordering.
+//     A correction (see Ack) is a TransformBroadcast sent to one client only;
+//     it advances server_seq without changing the stage, so other clients can
+//     see gaps in the values they receive.
+//   - On a TransformUpdate sent by a client, server_seq is the base of the
+//     update: the highest server_seq the client had received and applied when
+//     it created the update. The server rejects the update as "stale" if the
+//     prim was changed by someone else after the base, and as "invalid_base"
+//     if the base is higher than any server_seq sent to that client. 0 is a
+//     valid base (the state before the first change) and is checked like any
+//     other value.
 //   - request_id is chosen by the client for each TransformUpdate (for example
 //     a per-connection counter) and echoed back unchanged in the matching Ack.
 //     0 means "not set".

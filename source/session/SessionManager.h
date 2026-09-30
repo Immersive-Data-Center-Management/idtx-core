@@ -16,7 +16,8 @@
  * flusher and the reaper) only submit commands, which never blocks. Each
  * session's commands are executed one at a time, in submission order, by the
  * session's consumer. All stage reads and writes, and all per-session
- * outbound frames (acks, broadcasts, snapshots), happen on that consumer.
+ * outbound frames (acks, broadcasts, snapshots, corrections), happen on
+ * that consumer.
  *
  * Known limitation: sessions opened on the same USD file share the root
  * SdfLayer through the USD layer registry. Reloading or committing that layer
@@ -211,15 +212,33 @@ public:
     /**
      * @brief Queue a TransformUpdate for the session's consumer.
      *
-     * Never blocks. When accepted, the consumer applies the update, the
-     * TfNotice listener broadcasts the result to every other client, and
-     * @p origin receives an Ack carrying @p request_id. When not accepted,
-     * no Ack is sent; the caller is responsible for reporting the failure.
+     * Never blocks. When accepted, the consumer first checks @p base_seq: an
+     * update made on an outdated state is acked with "stale" or
+     * "invalid_base" and not applied. Otherwise the consumer applies the
+     * update, the TfNotice listener broadcasts the result to every other
+     * client, and @p origin receives an Ack carrying @p request_id. If the
+     * apply fails, the Ack is followed by a correction to @p origin. When not
+     * accepted, no Ack is sent; the caller is responsible for reporting the
+     * failure and, for QueueFull, for calling RequestCorrection().
      */
     SubmitStatus SubmitTransformUpdate(const std::string& session_id,
                                        std::unique_ptr<const idtxcore::TransformUpdate> update,
                                        ConnectionId origin,
-                                       std::uint64_t request_id) const;
+                                       std::uint64_t request_id,
+                                       std::uint64_t base_seq) const;
+
+    /**
+     * @brief Queue a correction of @p request->prim_path for @p connection_id
+     *        after one of its updates was rejected with QueueFull.
+     *
+     * The consumer sends the prim's server state to that connection only,
+     * before any normal command still queued. Does nothing if the same
+     * request is already queued. Never blocks; if the correction cannot be
+     * queued it is dropped and a later rejection retries.
+     */
+    void RequestCorrection(const std::string& session_id,
+                           ConnectionId connection_id,
+                           std::shared_ptr<PendingCorrection> request) const;
 
     /**
      * @brief Queue a join snapshot for a freshly attached connection.
@@ -244,7 +263,7 @@ public:
      *        Reads the resolved transform from the stage at default time and
      *        stamps the frame with @p server_seq.
      */
-    void BroadcastResolvedTransform(const Session& session,
+    void BroadcastResolvedTransform(Session& session,
                                     const std::string& prim_path,
                                     ConnectionId origin,
                                     std::uint64_t server_seq);
@@ -299,6 +318,8 @@ public:
 private:
     /// Submit @p command to @p session and map the admission result.
     static SubmitStatus Submit(Session& session, SessionCommand command);
+    /// Like Submit(), but the command overtakes the session's normal queue.
+    static SubmitStatus SubmitPriority(Session& session, SessionCommand command);
 
     /// Command handler installed on every session's scheduler. Runs on the
     /// session's consumer.
@@ -309,6 +330,7 @@ private:
     void HandleCommand(Session& session, CommitCommand& command);
     void HandleCommand(Session& session, ReloadCommand& command);
     void HandleCommand(Session& session, FlushCommand& command);
+    void HandleCommand(Session& session, CorrectionCommand& command);
 
     /// Save the sidecar and fold the session's overrides into the original
     /// file. Requires exclusive access to the session's stage (the consumer,
@@ -316,9 +338,25 @@ private:
     CommitResult CommitOverrides(Session& session);
 
     /// Send @p payload to one connection of @p session, if still attached.
-    static void SendToConnection(const Session& session,
+    /// Returns true if it was sent.
+    static bool SendToConnection(const Session& session,
                                  ConnectionId connection_id,
                                  const std::string& payload);
+
+    /// Send an Ack stamped with the current server_seq to @p connection_id.
+    static void SendAck(Session& session,
+                        ConnectionId connection_id,
+                        std::uint64_t request_id,
+                        bool ok,
+                        const char* error);
+
+    /// Send the current state of @p prim_path to @p connection_id only, as a
+    /// TransformBroadcast with a new server_seq. The stage is not changed.
+    /// Nothing is sent if the prim has no readable transform or the
+    /// connection has detached.
+    static void SendCorrection(Session& session,
+                               ConnectionId connection_id,
+                               const std::string& prim_path);
 
     /// Close admission, wait for the session's consumer to finish every
     /// accepted command, then revoke the listener and clear the stage's

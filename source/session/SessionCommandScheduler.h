@@ -37,7 +37,9 @@ enum class CommandAdmissionStatus : std::uint8_t
  * drain is scheduled or running stay lock-free.
  *
  * Accepted commands are handed to the command handler one at a time, in the
- * order their mailbox positions were reserved. At most one drain task is
+ * order their mailbox positions were reserved. Commands submitted with
+ * TrySubmitPriority() go into a small second mailbox that the consumer
+ * empties before every normal command, so they overtake the normal queue. At most one drain task is
  * scheduled or running on the executor at any time, so the handler is the
  * single logical consumer of the session and needs no locking. A drain
  * processes at most kMaxCommandsPerDrain commands before yielding the worker
@@ -55,9 +57,10 @@ class SessionCommandScheduler final
     : public std::enable_shared_from_this<SessionCommandScheduler>
 {
 public:
-    static constexpr std::size_t kMailboxCapacity        = 1024;
-    static constexpr std::size_t kMaxCommandsPerDrain    = 64;
-    static constexpr std::size_t kHeadPublicationRetries = 16;
+    static constexpr std::size_t kMailboxCapacity         = 1024;
+    static constexpr std::size_t kPriorityMailboxCapacity = 128;
+    static constexpr std::size_t kMaxCommandsPerDrain     = 64;
+    static constexpr std::size_t kHeadPublicationRetries  = 16;
 
     using CommandHandler = std::function<void(SessionCommand&&)>;
 
@@ -88,6 +91,16 @@ public:
      */
     [[nodiscard]]
     CommandAdmissionStatus TrySubmit(SessionCommand command);
+
+    /**
+     * @brief Attempt to submit a command that runs before every normal command
+     *        that has not started yet.
+     *
+     * Same admission rules as TrySubmit(); QueueFull refers to the priority
+     * mailbox. Priority commands run in submission order among themselves.
+     */
+    [[nodiscard]]
+    CommandAdmissionStatus TrySubmitPriority(SessionCommand command);
 
     /**
      * @brief Reject all further submissions.
@@ -128,6 +141,10 @@ public:
                             CommandHandler                                   command_handler);
 
 private:
+    template<std::size_t Capacity>
+    CommandAdmissionStatus Submit(BoundedMpscMailbox<SessionCommand, Capacity>& mailbox,
+                                  SessionCommand&&                              command);
+
     void ScheduleDrainIfRequired();
     void RunDrainTask() noexcept;
 
@@ -137,14 +154,15 @@ private:
     [[nodiscard]] bool DrainBatch() noexcept;
     void ReleasePending() noexcept;
 
-    BoundedMpscMailbox<SessionCommand, kMailboxCapacity> mailbox_;
+    BoundedMpscMailbox<SessionCommand, kMailboxCapacity>         mailbox_;
+    BoundedMpscMailbox<SessionCommand, kPriorityMailboxCapacity> priority_mailbox_;
 
     std::weak_ptr<idtx::concurrency::WorkerExecutor> executor_;
     CommandHandler                                   command_handler_;
 
     // Counts submissions that have entered TrySubmit() but have not yet been
-    // processed or rejected. It is incremented before the admission check and
-    // before TryPush(), so a producer that has reserved but not yet published
+    // processed or rejected, in both mailboxes. It is incremented before the
+    // admission check and before TryPush(), so a producer that has reserved but not yet published
     // a mailbox position is already visible to the consumer and to WaitIdle().
     std::atomic<std::size_t> pending_count_{0};
 

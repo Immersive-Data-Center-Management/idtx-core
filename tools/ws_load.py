@@ -2,8 +2,13 @@
 """Websocket load and churn client for idtx-core.
 
 Simulates clients of one collaborative session and reports how the server
-keeps up: ack latency, broadcast fan-out latency, queue_full rejections and
-server_seq ordering.
+keeps up: ack latency, broadcast fan-out latency, rejections (queue_full,
+stale), corrections, server_seq ordering and whether every client ends on
+the server state.
+
+Clients behave as the protocol requires: they show their own update right
+away, apply every broadcast they receive and send the highest server_seq they
+have received as the base of each update.
 
 Scenarios:
   drag   Some clients ("draggers") send TransformUpdates for one prim at a
@@ -143,7 +148,10 @@ class Stats:
     acks_ok: int = 0
     acks_rejected: dict[str, int] = field(default_factory=dict)
     ok_seqs: list[int] = field(default_factory=list)
+    ok_values: list[tuple[int, float]] = field(default_factory=list)  # (server_seq, x)
     broadcasts: int = 0
+    broadcast_seqs: list[int] = field(default_factory=list)
+    shown: float | None = None  # x the client currently shows
     fanout_latency: list[float] = field(default_factory=list)
     last_broadcast_at: float = 0.0
     seq_regressions: int = 0
@@ -210,6 +218,7 @@ class Client:
             if msg.ack.ok:
                 st.acks_ok += 1
                 st.ok_seqs.append(msg.server_seq)
+                st.ok_values.append((msg.server_seq, unique_x(self.index, msg.request_id)))
             else:
                 st.acks_rejected[msg.ack.error] = st.acks_rejected.get(msg.ack.error, 0) + 1
             self.acks_pending -= 1
@@ -217,8 +226,10 @@ class Client:
                 self.all_acked.set()
         elif kind == "xform_broadcast":
             st.broadcasts += 1
+            st.broadcast_seqs.append(msg.server_seq)
             st.last_broadcast_at = now
             x = msg.xform_broadcast.update.seperate.translation.x
+            st.shown = x
             sent_at = self.value_times.get(x)
             if sent_at is not None:
                 st.fanout_latency.append(now - sent_at)
@@ -227,6 +238,7 @@ class Client:
         msg = pb.BaseMessage()
         msg.session_id = self.sid
         msg.request_id = request_id
+        msg.server_seq = self.stats.last_seq  # the base: highest server_seq received
         upd = msg.xform_update
         upd.session_id = self.sid
         upd.usd_file = self.usd_file
@@ -241,6 +253,7 @@ class Client:
         self.acks_pending += 1
         self.all_acked.clear()
         self.stats.sent += 1
+        self.stats.shown = x
         await self.ws.send(payload)
 
     async def close(self) -> None:
@@ -326,13 +339,24 @@ def report(args, clients: list[Client], draggers: list[Client], send_rates: list
     print(f"fan-out latency : {fmt_ms(fanout)}")
 
     # Every applied update is broadcast to every client except its sender.
+    # Any other broadcast is a correction sent to one client only.
+    applied = {s for d in draggers for s in d.stats.ok_seqs}
     expected = 0
     got = 0
+    corrections = 0
     for c in clients:
         others_ok = sum(d.stats.acks_ok for d in draggers if d is not c)
         expected += others_ok
-        got += c.stats.broadcasts
-    print(f"broadcasts      : {got} received / {expected} expected")
+        got += sum(1 for s in c.stats.broadcast_seqs if s in applied)
+        corrections += sum(1 for s in c.stats.broadcast_seqs if s not in applied)
+    print(f"broadcasts      : {got} received / {expected} expected, {corrections} correction(s)")
+
+    # The server state is the value of the update applied last.
+    applied_values = [v for d in draggers for v in d.stats.ok_values]
+    if applied_values:
+        final_x = max(applied_values)[1]
+        converged = sum(1 for c in clients if c.stats.shown == final_x)
+        print(f"final state     : {converged}/{len(clients)} client(s) show the server state")
 
     last_bcast = max((c.stats.last_broadcast_at for c in clients), default=0.0)
     if last_bcast:

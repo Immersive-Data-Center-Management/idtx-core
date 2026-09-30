@@ -27,6 +27,19 @@ SessionCommandScheduler::SessionCommandScheduler(
 
 CommandAdmissionStatus SessionCommandScheduler::TrySubmit(SessionCommand command)
 {
+    return Submit(mailbox_, std::move(command));
+}
+
+CommandAdmissionStatus SessionCommandScheduler::TrySubmitPriority(SessionCommand command)
+{
+    return Submit(priority_mailbox_, std::move(command));
+}
+
+template<std::size_t Capacity>
+CommandAdmissionStatus SessionCommandScheduler::Submit(
+    BoundedMpscMailbox<SessionCommand, Capacity>& mailbox,
+    SessionCommand&&                              command)
+{
     // Announce the submission before checking admission. Together with the
     // sequentially consistent operations in CloseAdmission() and WaitIdle()
     // this guarantees that either this submission observes the closed gate,
@@ -39,7 +52,7 @@ CommandAdmissionStatus SessionCommandScheduler::TrySubmit(SessionCommand command
         return CommandAdmissionStatus::Stopping;
     }
 
-    if (!mailbox_.TryPush(std::move(command)))
+    if (!mailbox.TryPush(std::move(command)))
     {
         ReleasePending();
         return CommandAdmissionStatus::QueueFull;
@@ -123,7 +136,8 @@ bool SessionCommandScheduler::DrainBatch() noexcept
 
     while (processed < kMaxCommandsPerDrain)
     {
-        std::optional<SessionCommand> command = mailbox_.TryPop();
+        std::optional<SessionCommand> command = priority_mailbox_.TryPop();
+        if (!command) command = mailbox_.TryPop();
         if (!command)
         {
             if (pending_count_.load() == 0)

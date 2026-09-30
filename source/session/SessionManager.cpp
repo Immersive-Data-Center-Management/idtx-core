@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <future>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
@@ -97,24 +98,20 @@ bool ReadResolvedTransform(const pxr::UsdStageRefPtr& stage,
     return true;
 }
 
-/// Build a serialized BaseMessage(xform_broadcast) for @p prim_path from the
-/// resolved transform on @p session's stage, stamped with @p server_seq.
-/// Returns false when the prim has no readable transform. Shared by the live
-/// broadcast and the join snapshot.
-bool BuildBroadcastPayload(const Session& session,
-                           const std::string& prim_path,
-                           std::uint64_t server_seq,
-                           std::string& out_payload)
+/// Build a BaseMessage(xform_broadcast) for @p prim_path from the resolved
+/// transform on @p session's stage, without a server_seq. Returns nullopt when
+/// the prim has no readable transform.
+std::optional<idtxcore::BaseMessage> BuildBroadcastMessage(const Session& session,
+                                                           const std::string& prim_path)
 {
     idtxcore::SeparateTransform sep;
     idtxcore::Matrix4dTransform mat;
     bool use_matrix = false;
     if (!ReadResolvedTransform(session.stage, prim_path, sep, mat, use_matrix))
-        return false;
+        return std::nullopt;
 
     idtxcore::BaseMessage msg;
     msg.set_session_id(session.id);
-    msg.set_server_seq(server_seq);
     auto* bcast = msg.mutable_xform_broadcast();
     bcast->set_client_id(""); // server-originated
 
@@ -128,18 +125,32 @@ bool BuildBroadcastPayload(const Session& session,
     if (use_matrix) *upd->mutable_matrix()   = std::move(mat);
     else            *upd->mutable_seperate() = std::move(sep);
 
-    return msg.SerializeToString(&out_payload);
+    return msg;
+}
+
+/// Serialized BuildBroadcastMessage() stamped with @p server_seq. Shared by
+/// the live broadcast and the join snapshot.
+bool BuildBroadcastPayload(const Session& session,
+                           const std::string& prim_path,
+                           std::uint64_t server_seq,
+                           std::string& out_payload)
+{
+    std::optional<idtxcore::BaseMessage> msg = BuildBroadcastMessage(session, prim_path);
+    if (!msg) return false;
+    msg->set_server_seq(server_seq);
+    return msg->SerializeToString(&out_payload);
 }
 
 std::string SerializeAck(const Session& session,
                          std::uint64_t request_id,
+                         std::uint64_t server_seq,
                          bool ok,
-                         const std::string& error)
+                         const char* error)
 {
     idtxcore::BaseMessage msg;
     msg.set_session_id(session.id);
     msg.set_request_id(request_id);
-    msg.set_server_seq(session.server_seq.load());
+    msg.set_server_seq(server_seq);
     auto* ack = msg.mutable_ack();
     ack->set_ok(ok);
     if (!ok) ack->set_error(error);
@@ -147,6 +158,17 @@ std::string SerializeAck(const Session& session,
     std::string payload;
     msg.SerializeToString(&payload);
     return payload;
+}
+
+SessionManager::SubmitStatus ToSubmitStatus(const CommandAdmissionStatus status)
+{
+    switch (status)
+    {
+        case CommandAdmissionStatus::Accepted:  return SessionManager::SubmitStatus::Accepted;
+        case CommandAdmissionStatus::QueueFull: return SessionManager::SubmitStatus::QueueFull;
+        case CommandAdmissionStatus::Stopping:
+        default:                                return SessionManager::SubmitStatus::SessionClosing;
+    }
 }
 
 } // namespace
@@ -566,21 +588,21 @@ void SessionManager::DetachClient(const std::string& session_id,
 SessionManager::SubmitStatus SessionManager::Submit(Session& session, SessionCommand command)
 {
     if (!session.commands) return SubmitStatus::SessionClosing;
+    return ToSubmitStatus(session.commands->TrySubmit(std::move(command)));
+}
 
-    switch (session.commands->TrySubmit(std::move(command)))
-    {
-        case CommandAdmissionStatus::Accepted:  return SubmitStatus::Accepted;
-        case CommandAdmissionStatus::QueueFull: return SubmitStatus::QueueFull;
-        case CommandAdmissionStatus::Stopping:
-        default:                                return SubmitStatus::SessionClosing;
-    }
+SessionManager::SubmitStatus SessionManager::SubmitPriority(Session& session, SessionCommand command)
+{
+    if (!session.commands) return SubmitStatus::SessionClosing;
+    return ToSubmitStatus(session.commands->TrySubmitPriority(std::move(command)));
 }
 
 SessionManager::SubmitStatus SessionManager::SubmitTransformUpdate(
     const std::string& session_id,
     std::unique_ptr<const idtxcore::TransformUpdate> update,
     ConnectionId origin,
-    std::uint64_t request_id) const {
+    std::uint64_t request_id,
+    std::uint64_t base_seq) const {
     auto session = Get(session_id);
     if (!session)
     {
@@ -589,12 +611,35 @@ SessionManager::SubmitStatus SessionManager::SubmitTransformUpdate(
     }
     if (!update) return SubmitStatus::Accepted; // nothing to apply
 
-    const auto status = Submit(*session, TransformCommand(std::move(update), origin, request_id));
+    const auto status = Submit(*session,
+                               TransformCommand(std::move(update), origin, request_id, base_seq));
     if (status == SubmitStatus::QueueFull)
     {
         IDTX_LOG(IDTX_WARN, "Session {} command queue is full; rejecting update.", session_id);
     }
     return status;
+}
+
+void SessionManager::RequestCorrection(const std::string& session_id,
+                                       ConnectionId connection_id,
+                                       std::shared_ptr<PendingCorrection> request) const
+{
+    if (!request) return;
+    auto session = Get(session_id);
+    if (!session) return;
+
+    // One queued correction per request is enough: it reads the state when it
+    // runs, which covers every rejection before that.
+    if (request->queued.exchange(true)) return;
+
+    const auto status = SubmitPriority(*session, CorrectionCommand{connection_id, request});
+    if (status != SubmitStatus::Accepted)
+    {
+        request->queued.store(false);
+        if (status == SubmitStatus::QueueFull)
+            IDTX_LOG(IDTX_WARN, "Session {}: correction queue is full; dropping correction for '{}'.",
+                     session_id, request->prim_path);
+    }
 }
 
 SessionManager::SubmitStatus SessionManager::RequestJoinSnapshot(
@@ -628,6 +673,28 @@ void SessionManager::ProcessCommand(Session& session, SessionCommand&& command)
 
 void SessionManager::HandleCommand(Session& session, TransformCommand& command)
 {
+    const std::string& prim_path = command.update->prim_path();
+
+    // An update made on an outdated state is rejected before the stage is
+    // touched. No correction follows: for a stale update the newer state was
+    // already sent to the client, and an invalid base is a client bug.
+    switch (session.versions.CheckUpdate(command.origin, prim_path, command.base_seq))
+    {
+        case UpdateBaseStatus::Stale:
+            IDTX_LOG(IDTX_DEBUG, "Session {}: stale update of '{}' (base {}).",
+                     session.id, prim_path, command.base_seq);
+            SendAck(session, command.origin, command.request_id, false, "stale");
+            return;
+        case UpdateBaseStatus::InvalidBase:
+            IDTX_LOG(IDTX_WARN,
+                     "Session {}: update of '{}' has base {}, which was never sent to the client.",
+                     session.id, prim_path, command.base_seq);
+            SendAck(session, command.origin, command.request_id, false, "invalid_base");
+            return;
+        case UpdateBaseStatus::Current:
+            break;
+    }
+
     bool ok = false;
     session.current_origin.store(command.origin, std::memory_order_relaxed);
     try
@@ -646,8 +713,11 @@ void SessionManager::HandleCommand(Session& session, TransformCommand& command)
 
     // The Ack is sent after the broadcasts triggered by this update, and its
     // server_seq reflects the state after the update.
-    SendToConnection(session, command.origin,
-                     SerializeAck(session, command.request_id, ok, "apply_failed"));
+    SendAck(session, command.origin, command.request_id, ok, "apply_failed");
+
+    // The client already shows its update. The prim is unchanged, so tell the
+    // client what the server has instead.
+    if (!ok) SendCorrection(session, command.origin, prim_path);
 }
 
 void SessionManager::HandleCommand(Session& session, JoinCommand& command)
@@ -693,6 +763,7 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
         auto it = session.clients.find(command.connection);
         if (it == session.clients.end()) return; // left before the snapshot ran
         for (const auto& f : frames) it->second->send_binary(f);
+        session.versions.RecordSent(command.connection, seq);
     }
 
     IDTX_LOG(IDTX_INFO, "Sent join snapshot ({} prim frame(s)) to a client of session {}.",
@@ -782,6 +853,15 @@ void SessionManager::HandleCommand(Session& session, FlushCommand& /*command*/)
     }
 }
 
+void SessionManager::HandleCommand(Session& session, CorrectionCommand& command)
+{
+    if (!command.request) return;
+    // Clear the mark before reading the state, so an update rejected from now
+    // on queues a correction of its own.
+    command.request->queued.store(false);
+    SendCorrection(session, command.connection, command.request->prim_path);
+}
+
 CommitResult SessionManager::CommitOverrides(Session& session)
 {
     CommitResult result;
@@ -816,21 +896,60 @@ CommitResult SessionManager::CommitOverrides(Session& session)
     return result;
 }
 
-void SessionManager::SendToConnection(const Session& session,
+bool SessionManager::SendToConnection(const Session& session,
                                       ConnectionId connection_id,
                                       const std::string& payload)
 {
-    if (connection_id == 0 || payload.empty()) return;
+    if (connection_id == 0 || payload.empty()) return false;
     std::shared_lock lk(session.clients_mutex);
     auto it = session.clients.find(connection_id);
-    if (it != session.clients.end()) it->second->send_binary(payload);
+    if (it == session.clients.end()) return false;
+    it->second->send_binary(payload);
+    return true;
+}
+
+void SessionManager::SendAck(Session& session,
+                             ConnectionId connection_id,
+                             std::uint64_t request_id,
+                             bool ok,
+                             const char* error)
+{
+    const std::uint64_t seq = session.server_seq.load();
+    if (SendToConnection(session, connection_id,
+                         SerializeAck(session, request_id, seq, ok, error)))
+    {
+        session.versions.RecordSent(connection_id, seq);
+    }
+}
+
+void SessionManager::SendCorrection(Session& session,
+                                    ConnectionId connection_id,
+                                    const std::string& prim_path)
+{
+    if (!session.stage || connection_id == 0) return;
+
+    std::optional<idtxcore::BaseMessage> msg = BuildBroadcastMessage(session, prim_path);
+    if (!msg) return; // unknown prim or no readable transform: nothing to correct
+
+    std::shared_lock lk(session.clients_mutex);
+    auto it = session.clients.find(connection_id);
+    if (it == session.clients.end()) return;
+
+    // Updates the client sent before it receives this version are stale, so
+    // the correction is the last state it gets for the prim.
+    const std::uint64_t seq = session.server_seq.fetch_add(1) + 1;
+    msg->set_server_seq(seq);
+    std::string payload;
+    if (!msg->SerializeToString(&payload)) return;
+    it->second->send_binary(payload);
+    session.versions.RecordCorrection(connection_id, prim_path, seq);
 }
 
 // ---------------------------------------------------------------------------
 // Broadcast
 // ---------------------------------------------------------------------------
 
-void SessionManager::BroadcastResolvedTransform(const Session& session,
+void SessionManager::BroadcastResolvedTransform(Session& session,
                                                 const std::string& prim_path,
                                                 ConnectionId origin,
                                                 std::uint64_t server_seq)
@@ -850,7 +969,9 @@ void SessionManager::BroadcastResolvedTransform(const Session& session,
     std::shared_lock lk(session.clients_mutex);
     for (const auto& [id, conn] : session.clients)
     {
-        if (id != origin) conn->send_binary(payload);
+        if (id == origin) continue;
+        conn->send_binary(payload);
+        session.versions.RecordSent(id, server_seq);
     }
 }
 

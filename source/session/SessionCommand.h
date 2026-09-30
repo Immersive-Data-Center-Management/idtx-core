@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <future>
@@ -62,15 +63,21 @@ struct TransformCommand
     // Client-assigned id echoed back in the Ack (0 if the client sent none).
     std::uint64_t request_id{};
 
+    // The server_seq the client had received and applied when it created the
+    // update. The update is rejected if it was made on an outdated state.
+    std::uint64_t base_seq{};
+
     std::chrono::steady_clock::time_point received_at{
         std::chrono::steady_clock::now()};
 
     TransformCommand(std::unique_ptr<const idtxcore::TransformUpdate> update_value,
                      ConnectionId                                     origin_value,
-                     std::uint64_t                                    request_id_value) noexcept
+                     std::uint64_t                                    request_id_value,
+                     std::uint64_t                                    base_seq_value) noexcept
         : update(std::move(update_value))
         , origin(origin_value)
         , request_id(request_id_value)
+        , base_seq(base_seq_value)
     {
     }
 
@@ -115,12 +122,45 @@ struct FlushCommand
 {
 };
 
+/**
+ * @brief A correction owed to one connection for one prim.
+ *
+ * Shared between the connection's io thread, which sets @c queued when it
+ * submits a CorrectionCommand, and the consumer, which clears it before it
+ * reads the prim's state. So at most one correction per (connection, prim)
+ * is queued at a time, and a rejection after the state was read queues a new
+ * one.
+ */
+struct PendingCorrection
+{
+    explicit PendingCorrection(std::string prim_path_value)
+        : prim_path(std::move(prim_path_value))
+    {
+    }
+
+    const std::string prim_path;
+    std::atomic<bool> queued{false};
+};
+
+/**
+ * @brief Send the server state of a prim to one connection whose valid update
+ *        was not applied because the queue was full.
+ *
+ * Submitted with priority, so it runs before the commands already queued.
+ */
+struct CorrectionCommand
+{
+    ConnectionId                       connection{};
+    std::shared_ptr<PendingCorrection> request;
+};
+
 using SessionCommand = std::variant<
     TransformCommand,
     JoinCommand,
     CommitCommand,
     ReloadCommand,
-    FlushCommand>;
+    FlushCommand,
+    CorrectionCommand>;
 
 static_assert(std::is_nothrow_move_constructible_v<SessionCommand>);
 static_assert(std::is_nothrow_destructible_v<SessionCommand>);

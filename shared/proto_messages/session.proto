@@ -8,9 +8,20 @@ package idtxcore;
 // Sent exactly once for every TransformUpdate. The enclosing
 // BaseMessage.request_id echoes the update's request_id. When ok is false,
 // error holds one of:
-//   "apply_failed"    - the update was processed but could not be applied
-//   "queue_full"      - the session's command queue is full; retry later
+//   "stale"           - the prim was changed by someone else after the
+//                       update's base; the newer state was already sent to
+//                       the client
+//   "invalid_base"    - the update's base is higher than any server_seq sent
+//                       to the client (client bug); nothing else follows
+//   "apply_failed"    - the update was processed but could not be applied; a
+//                       correction follows
+//   "queue_full"      - the session's command queue is full; a correction
+//                       follows
 //   "session_closing" - the session is shutting down; the update was dropped
+// A correction is a TransformBroadcast with the prim's server state, sent to
+// the rejected client only, with a new server_seq. Updates the client sent
+// before it received the correction are rejected as stale, so the correction
+// is the last state the client receives for the prim.
 message Ack {
     string ref_id = 1;
     bool   ok     = 2;

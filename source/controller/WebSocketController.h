@@ -8,13 +8,16 @@
  *
  * Incoming updates are queued on the session and never processed on the
  * websocket thread. The resulting Ack is sent by the session's consumer; only
- * an update the session could not accept is answered here directly.
+ * an update the session could not accept is answered here directly. For an
+ * update rejected because the queue was full, a correction is requested so
+ * the client learns the server state of the prim.
  */
 #pragma once
 
 #include <atomic>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 #include <crow/http_request.h>
 #include <crow/websocket.h>
@@ -37,6 +40,12 @@ class WebSocketController
         // Captured at accept time: querying the socket later throws once it
         // has been closed, e.g. inside the close handler.
         std::string                       remote_ip;
+        // One correction request per prim this connection had an update of
+        // rejected with queue_full, reused for every later rejection of the
+        // same prim. Only touched by the connection's message handler, which
+        // crow never runs concurrently for one connection.
+        std::unordered_map<std::string, std::shared_ptr<idtx::session::PendingCorrection>>
+                                          pending_corrections;
     };
 
 public:
@@ -49,6 +58,8 @@ public:
     void OnMessage(crow::websocket::connection& conn, const std::string& data, bool isBinary);
 
 private:
+    void RequestCorrection(WsUserData& ws_data, const std::string& prim_path);
+
     std::shared_ptr<idtx::session::SessionManager> m_manager_;
 
     // Source of connection ids, unique per controller.

@@ -197,6 +197,86 @@ TEST_CASE("scheduler: reports QueueFull once the mailbox is full")
     scheduler->WaitIdle();
 }
 
+TEST_CASE("scheduler: priority commands overtake queued normal commands")
+{
+    auto executor = std::make_shared<WorkerExecutor>(1);
+    Recorder recorder;
+    auto scheduler = SessionCommandScheduler::Create(executor, recorder.Handler());
+
+    WorkerBlocker blocker(*executor);
+    for (std::uint64_t i = 0; i < 5; ++i)
+    {
+        REQUIRE(scheduler->TrySubmit(Tagged(i)) == CommandAdmissionStatus::Accepted);
+    }
+    REQUIRE(scheduler->TrySubmitPriority(Tagged(100)) == CommandAdmissionStatus::Accepted);
+    REQUIRE(scheduler->TrySubmitPriority(Tagged(101)) == CommandAdmissionStatus::Accepted);
+    REQUIRE(scheduler->TrySubmit(Tagged(5)) == CommandAdmissionStatus::Accepted);
+
+    blocker.Release();
+    scheduler->WaitIdle();
+
+    CHECK(recorder.Snapshot() == std::vector<std::uint64_t>{100, 101, 0, 1, 2, 3, 4, 5});
+    CHECK_FALSE(recorder.overlapped);
+}
+
+TEST_CASE("scheduler: a priority command submitted during a drain runs before the next normal one")
+{
+    auto executor = std::make_shared<WorkerExecutor>(1);
+
+    // Only touched by the consumer; read after WaitIdle().
+    std::vector<std::uint64_t>               order;
+    bool                                     priority_accepted = false;
+    std::shared_ptr<SessionCommandScheduler> scheduler;
+    scheduler = SessionCommandScheduler::Create(
+        executor,
+        [&](SessionCommand&& command) {
+            const std::uint64_t tag = TagOf(command);
+            order.push_back(tag);
+            if (tag == 1)
+            {
+                priority_accepted = scheduler->TrySubmitPriority(Tagged(200))
+                                    == CommandAdmissionStatus::Accepted;
+            }
+        });
+
+    WorkerBlocker blocker(*executor);
+    for (std::uint64_t i = 0; i < 4; ++i)
+    {
+        REQUIRE(scheduler->TrySubmit(Tagged(i)) == CommandAdmissionStatus::Accepted);
+    }
+    blocker.Release();
+    scheduler->WaitIdle();
+
+    CHECK(priority_accepted);
+    CHECK(order == std::vector<std::uint64_t>{0, 1, 200, 2, 3});
+}
+
+TEST_CASE("scheduler: the priority mailbox has its own capacity and admission")
+{
+    auto executor = std::make_shared<WorkerExecutor>(1);
+    Recorder recorder;
+    auto scheduler = SessionCommandScheduler::Create(executor, recorder.Handler());
+
+    WorkerBlocker blocker(*executor);
+    for (std::uint64_t i = 0; i < SessionCommandScheduler::kPriorityMailboxCapacity; ++i)
+    {
+        REQUIRE(scheduler->TrySubmitPriority(Tagged(i)) == CommandAdmissionStatus::Accepted);
+    }
+    CHECK(scheduler->TrySubmitPriority(Tagged(9999)) == CommandAdmissionStatus::QueueFull);
+    // The normal mailbox is still available.
+    CHECK(scheduler->TrySubmit(Tagged(5000)) == CommandAdmissionStatus::Accepted);
+
+    scheduler->CloseAdmission();
+    CHECK(scheduler->TrySubmitPriority(Tagged(9998)) == CommandAdmissionStatus::Stopping);
+
+    blocker.Release();
+    scheduler->WaitIdle();
+
+    const auto tags = recorder.Snapshot();
+    REQUIRE(tags.size() == SessionCommandScheduler::kPriorityMailboxCapacity + 1);
+    CHECK(tags.back() == 5000);
+}
+
 TEST_CASE("scheduler: a busy session yields the worker after one batch")
 {
     auto executor = std::make_shared<WorkerExecutor>(1);

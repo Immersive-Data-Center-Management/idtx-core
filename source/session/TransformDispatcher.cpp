@@ -4,6 +4,7 @@
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/xformOp.h>
@@ -16,6 +17,41 @@ namespace session
 namespace
 {
 
+// Precision of the ops the dispatcher authors.
+constexpr auto kTranslatePrecision = pxr::UsdGeomXformOp::PrecisionDouble;
+constexpr auto kRotatePrecision    = pxr::UsdGeomXformOp::PrecisionFloat;
+constexpr auto kScalePrecision     = pxr::UsdGeomXformOp::PrecisionFloat;
+constexpr auto kMatrixPrecision    = pxr::UsdGeomXformOp::PrecisionDouble;
+
+// UsdGeomXformable::AddXformOp fails if an attribute with the op's name
+// already exists with another value type (for example a float translate).
+bool CanAddOp(const pxr::UsdPrim&                  prim,
+              const pxr::UsdGeomXformOp::Type      type,
+              const pxr::UsdGeomXformOp::Precision precision)
+{
+    const pxr::UsdAttribute attr = prim.GetAttribute(pxr::UsdGeomXformOp::GetOpName(type));
+    return !attr || attr.GetTypeName() == pxr::UsdGeomXformOp::GetValueTypeName(type, precision);
+}
+
+// True if every op the update authors can be added. Checked before anything
+// is changed, because the apply functions clear the op order first and a
+// failure after that would leave the prim modified.
+bool CanAuthorOps(const pxr::UsdPrim& prim, const idtxcore::TransformUpdate& upd)
+{
+    switch (upd.transform_case())
+    {
+        case idtxcore::TransformUpdate::kSeperate:
+            return CanAddOp(prim, pxr::UsdGeomXformOp::TypeTranslate, kTranslatePrecision)
+                && CanAddOp(prim, pxr::UsdGeomXformOp::TypeRotateXYZ, kRotatePrecision)
+                && CanAddOp(prim, pxr::UsdGeomXformOp::TypeScale,     kScalePrecision);
+        case idtxcore::TransformUpdate::kMatrix:
+            return CanAddOp(prim, pxr::UsdGeomXformOp::TypeTransform, kMatrixPrecision);
+        case idtxcore::TransformUpdate::TRANSFORM_NOT_SET:
+        default:
+            return true;
+    }
+}
+
 bool ApplySeparate(pxr::UsdGeomXformable& xformable,
                    const idtxcore::SeparateTransform& sep)
 {
@@ -27,9 +63,9 @@ bool ApplySeparate(pxr::UsdGeomXformable& xformable,
     bool reset_xform_stack = false;
     xformable.SetXformOpOrder({}, reset_xform_stack);
 
-    auto translateOp = xformable.AddTranslateOp(pxr::UsdGeomXformOp::PrecisionDouble);
-    auto rotateOp    = xformable.AddRotateXYZOp(pxr::UsdGeomXformOp::PrecisionFloat);
-    auto scaleOp     = xformable.AddScaleOp(pxr::UsdGeomXformOp::PrecisionFloat);
+    auto translateOp = xformable.AddTranslateOp(kTranslatePrecision);
+    auto rotateOp    = xformable.AddRotateXYZOp(kRotatePrecision);
+    auto scaleOp     = xformable.AddScaleOp(kScalePrecision);
 
     if (!translateOp || !rotateOp || !scaleOp) return false;
 
@@ -57,7 +93,7 @@ bool ApplyMatrix(pxr::UsdGeomXformable& xformable,
     bool reset_xform_stack = false;
     xformable.SetXformOpOrder({}, reset_xform_stack);
 
-    auto op = xformable.AddTransformOp(pxr::UsdGeomXformOp::PrecisionDouble);
+    auto op = xformable.AddTransformOp(kMatrixPrecision);
     if (!op) return false;
 
     pxr::GfMatrix4d gfm(
@@ -113,6 +149,15 @@ bool TransformDispatcher::Apply(const pxr::UsdStageRefPtr& stage,
 
     try
     {
+        if (!CanAuthorOps(prim, upd))
+        {
+            IDTX_LOG(IDTX_WARN,
+                     "Prim '{}' has an xform op attribute with a different precision; "
+                     "ignoring TransformUpdate.",
+                     prim_path_str);
+            return false;
+        }
+
         switch (upd.transform_case())
         {
             case idtxcore::TransformUpdate::kSeperate:
