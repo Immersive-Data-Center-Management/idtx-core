@@ -155,9 +155,12 @@ public:
      *
      * @param usd_file  Uploads-relative path of the file that was just
      *                  replaced on disk.
+     * @param skip      Session that is left out, because it has already
+     *                  reloaded (the committing session). May be null.
      * @return Number of sessions that accepted the reload command.
      */
-    std::size_t ReloadSessionsForFile(const std::string& usd_file);
+    std::size_t ReloadSessionsForFile(const std::string& usd_file,
+                                      const Session* skip = nullptr);
 
     // ------------------------------------------------------------------
     // Websocket-side API
@@ -288,7 +291,10 @@ public:
      *        Does not destroy the session.
      *
      * The commit is queued behind every command the session has already
-     * accepted, so it contains all previously acknowledged updates. Blocks
+     * accepted, so it contains all previously acknowledged updates. Before
+     * it returns, the session's root layer has been reloaded from the
+     * written file; the other sessions on the file reload asynchronously,
+     * in order with their own commands. Blocks
      * the calling thread for at most kCommitTimeout and returns
      * CommitStatus::Unavailable if the commit could not be queued or did not
      * finish in time. Safe to call from the REST thread; must not be called
@@ -341,9 +347,17 @@ private:
     void HandleCommand(Session& session, CorrectionCommand& command);
 
     /// Save the sidecar and fold the session's overrides into the original
-    /// file. Requires exclusive access to the session's stage (the consumer,
-    /// or a teardown after the consumer went idle).
-    CommitResult CommitOverrides(Session& session);
+    /// file. If @p reload_root is true, the session's root layer is then
+    /// reloaded from the written file under the same lock, so the in-memory
+    /// baseline matches the file before the caller continues. Requires
+    /// exclusive access to the session's stage (the consumer, or a teardown
+    /// after the consumer went idle).
+    CommitResult CommitOverrides(Session& session, bool reload_root);
+
+    /// Reload the session's root layer from disk and let the listener
+    /// broadcast the visible changes. The caller must hold
+    /// m_shared_layer_mutex_ and have exclusive access to the stage.
+    void ReloadRootLayer(Session& session);
 
     /// Send @p payload to one connection of @p session, if still attached.
     /// Returns true if it was sent.
@@ -382,7 +396,8 @@ private:
     std::shared_ptr<idtx::concurrency::WorkerExecutor>         m_executor_;
 
     // Serializes commands that mutate a root layer which may be shared with
-    // other sessions on the same file (reload and commit).
+    // other sessions on the same file (reload and commit). Not recursive:
+    // ReloadRootLayer() expects the caller to hold it.
     std::mutex                                                 m_shared_layer_mutex_;
 
     idtx::utils::UsdFileLocator                                m_locator_;

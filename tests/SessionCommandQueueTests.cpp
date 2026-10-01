@@ -23,6 +23,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <pxr/base/gf/vec3d.h>
+#include <pxr/usd/sdf/attributeSpec.h>
+#include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/path.h>
+
 #include "session/Session.h"
 #include "session/SessionManager.h"
 #include "support/HttpTestClient.h"
@@ -577,6 +582,35 @@ TEST_CASE("queue: commit writes every acknowledged update to the file")
     const auto unknown = http.PostJson(
         server.base_http_url() + "/api/v1/sessions/does-not-exist/commit", "{}");
     CHECK(unknown.status == 404);
+}
+
+TEST_CASE("queue: after a commit the server's root layer already holds the committed content")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "single_edit");
+
+    WsTestClient ws;
+    Join(ws, server, sid);
+    ws.SendBinary(idtx::tests::BuildTransformUpdate(sid, "cube.usda", kPrim, 4.0, 5.0, 6.0, 1));
+    const auto acks = Collect(ws, 1, std::chrono::seconds{5}, IsAck);
+    REQUIRE(acks.size() == 1);
+    REQUIRE(acks.front().ack().ok());
+
+    HttpTestClient http;
+    REQUIRE(http.PostJson(server.base_http_url() + "/api/v1/sessions/" + sid + "/commit",
+                          "{}").status == 200);
+
+    // The in-memory root layer the server shares through the layer registry,
+    // which a session created now would be opened on. It must match the file
+    // as soon as the commit has answered, not only after a queued reload.
+    const auto root = pxr::SdfLayer::Find((server.uploads_root() / "cube.usda").string());
+    REQUIRE(root);
+    const auto attr = root->GetAttributeAtPath(pxr::SdfPath("/Root/Cube.xformOp:translate"));
+    REQUIRE(attr);
+    const pxr::VtValue value = attr->GetDefaultValue();
+    REQUIRE(value.IsHolding<pxr::GfVec3d>());
+    CHECK(value.UncheckedGet<pxr::GfVec3d>() == pxr::GfVec3d(4.0, 5.0, 6.0));
 }
 
 TEST_CASE("queue: deleting a session with queued updates drains them cleanly")

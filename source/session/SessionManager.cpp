@@ -272,7 +272,7 @@ void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
     bool committed = false;
     if (session->auto_commit && session->stage && has_overrides)
     {
-        const CommitResult result = CommitOverrides(*session);
+        const CommitResult result = CommitOverrides(*session, /*reload_root=*/false);
         committed = result.status == CommitStatus::Ok;
         if (!committed)
             IDTX_LOG(IDTX_ERROR,
@@ -497,7 +497,8 @@ SessionManager::FindByUsdFile(const std::string& usd_file) const
     return matches;
 }
 
-std::size_t SessionManager::ReloadSessionsForFile(const std::string& usd_file)
+std::size_t SessionManager::ReloadSessionsForFile(const std::string& usd_file,
+                                                  const Session* skip)
 {
     const auto sessions = FindByUsdFile(usd_file);
     if (sessions.empty())
@@ -511,7 +512,7 @@ std::size_t SessionManager::ReloadSessionsForFile(const std::string& usd_file)
     std::size_t accepted = 0;
     for (const auto& session : sessions)
     {
-        if (!session) continue;
+        if (!session || session.get() == skip) continue;
         const auto status = Submit(*session, ReloadCommand{});
         if (status == SubmitStatus::Accepted)
         {
@@ -769,20 +770,29 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
 
 void SessionManager::HandleCommand(Session& session, CommitCommand& command)
 {
-    CommitResult result = CommitOverrides(session);
+    // The root layer is reloaded before the result is reported, so once the
+    // caller sees success the in-memory baseline matches the file and a
+    // session created afterwards starts from the committed content.
+    CommitResult result = CommitOverrides(session, /*reload_root=*/true);
     if (result.status == CommitStatus::Ok)
     {
         IDTX_LOG(IDTX_INFO, "Committed session {} to '{}'.", session.id, session.usd_file);
 
-        // Let every live session bound to the same file observe the new
-        // baseline (mirrors the upload-replacement reload path). Only queues
-        // commands, so this is safe from the consumer.
-        ReloadSessionsForFile(session.usd_file);
+        // Let every other live session bound to the same file observe the
+        // new baseline (mirrors the upload-replacement reload path). Only
+        // queues commands, so this is safe from the consumer.
+        ReloadSessionsForFile(session.usd_file, &session);
     }
     command.result.set_value(std::move(result));
 }
 
 void SessionManager::HandleCommand(Session& session, ReloadCommand& /*command*/)
+{
+    std::lock_guard shared_layer_lock(m_shared_layer_mutex_);
+    ReloadRootLayer(session);
+}
+
+void SessionManager::ReloadRootLayer(Session& session)
 {
     if (!session.stage) return;
 
@@ -792,8 +802,6 @@ void SessionManager::HandleCommand(Session& session, ReloadCommand& /*command*/)
         IDTX_LOG(IDTX_WARN, "Reload: session {} has no root layer; skipping.", session.id);
         return;
     }
-
-    std::lock_guard shared_layer_lock(m_shared_layer_mutex_);
 
     // Signal to StageNoticeListener that the imminent
     // UsdNotice::ObjectsChanged is a reload, not a client-authored change,
@@ -859,7 +867,7 @@ void SessionManager::HandleCommand(Session& session, CorrectionCommand& command)
     SendCorrection(session, command.connection, command.request->prim_path);
 }
 
-CommitResult SessionManager::CommitOverrides(Session& session)
+CommitResult SessionManager::CommitOverrides(Session& session, const bool reload_root)
 {
     CommitResult result;
     if (!session.stage)
@@ -890,6 +898,10 @@ CommitResult SessionManager::CommitOverrides(Session& session)
 
     session.dirty.store(false, std::memory_order_relaxed);
     result.status = CommitStatus::Ok;
+
+    // Under the same lock, so no other reload or commit can run between
+    // writing the file and reading it back.
+    if (reload_root) ReloadRootLayer(session);
     return result;
 }
 

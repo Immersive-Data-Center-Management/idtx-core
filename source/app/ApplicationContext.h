@@ -182,14 +182,14 @@ struct ApplicationContext
         // clients for IDTX_SESSION_IDLE_TIMEOUT_SECONDS (default 300s). Set the
         // variable to 0 to disable the reaper and keep sessions until an
         // explicit DELETE.
-        //
-        // Session commands are processed by a worker pool shared by all
-        // sessions; each session still runs its commands one at a time. The
-        // pool size is configurable via IDTX_SESSION_WORKERS.
         const auto idle_secs =
             EnvironmentUtils::get_env_u64("IDTX_SESSION_IDLE_TIMEOUT_SECONDS", 300);
         const std::uint64_t default_workers =
             std::clamp<std::uint64_t>(std::thread::hardware_concurrency(), 1, 4);
+
+        // Session commands are processed by a worker pool shared by all
+        // sessions; each session still runs its commands one at a time. The
+        // pool size is configurable via IDTX_SESSION_WORKERS.
         const auto session_workers = std::max<std::uint64_t>(
             EnvironmentUtils::get_env_u64("IDTX_SESSION_WORKERS", default_workers), 1);
         ctx.sessionManager        = std::make_shared<idtx::session::SessionManager>(
