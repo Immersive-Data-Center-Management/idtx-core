@@ -100,15 +100,14 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
     auto session = m_session_.lock();
     if (!session || !m_manager_) return;
 
-    // Capture and immediately clear the origin so a re-entrant authoring path
-    // (should not happen, but be safe) doesn't suppress unrelated broadcasts.
-    crow::websocket::connection* origin = session->last_origin;
-    session->last_origin = nullptr;
+    // The consumer sets the origin around the authoring call and resets it
+    // afterwards, so the listener only reads it.
+    const ConnectionId origin = session->current_origin.load(std::memory_order_relaxed);
 
     // -----------------------------------------------------------------
     // Reload branch
     //
-    // SessionManager::ReloadSessionsForFile flipped `reload_in_progress`
+    // The session's reload command set `reload_in_progress`
     // right before calling SdfLayer::Reload(force=true) on the root
     // layer. In that notice the affected paths reflect *authored* changes
     // on the root layer, but the resolved value on the composed stage may
@@ -124,7 +123,7 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
     // door open for non-transform attributes later, at which point only
     // the final broadcast call has to grow a switch.
     // -----------------------------------------------------------------
-    if (session->reload_in_progress)
+    if (session->reload_in_progress.load(std::memory_order_relaxed))
     {
         const pxr::SdfLayerHandle session_layer =
             session->stage ? session->stage->GetSessionLayer() : pxr::SdfLayerHandle();
@@ -141,11 +140,6 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
             else if (p.IsPropertyPath())     reload_prims.insert(p.GetPrimPath().GetString());
         }
 
-        // Consume the flag before we start broadcasting. If a nested notice
-        // fires from within a broadcast (should not, but defensive), it
-        // would then travel the normal branch.
-        session->reload_in_progress = false;
-
         if (reload_prims.empty())
         {
             IDTX_LOG(IDTX_DEBUG,
@@ -158,10 +152,13 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
                  "Reload notice in session {} affects {} prim(s); filtering against session layer.",
                  session->id, reload_prims.size());
 
+        // One state version for the whole reload.
+        const std::uint64_t seq = session->server_seq.fetch_add(1) + 1;
+
         for (const auto& prim_path_str : reload_prims)
         {
             // If the session layer authors a transform override for the
-            // prim, the client already holds the winning opinion — skip.
+            // prim, the client already holds the winning opinion - skip.
             if (session_layer && pxr::SdfPath::IsValidPathString(prim_path_str))
             {
                 const pxr::SdfPrimSpecHandle prim_spec =
@@ -176,9 +173,12 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
                 }
             }
 
-            // No conflicting override → propagate the current resolved
-            // transform, exactly like the normal branch would.
-            m_manager_->BroadcastResolvedTransform(session, prim_path_str, /*origin=*/nullptr);
+            // No conflicting override: propagate the current resolved
+            // transform, exactly like the normal branch would. Only changes
+            // clients see are recorded, so a suppressed prim does not make
+            // client updates stale.
+            session->versions.RecordChange(prim_path_str, seq, /*writer=*/0);
+            m_manager_->BroadcastResolvedTransform(*session, prim_path_str, /*origin=*/0, seq);
         }
         return;
     }
@@ -214,9 +214,12 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
     IDTX_LOG(IDTX_DEBUG, "Stage change in session {} affects {} prim(s); broadcasting.",
              session->id, affected_prims.size());
 
+    // One state version per notice: all broadcasts of this change share it.
+    const std::uint64_t seq = session->server_seq.fetch_add(1) + 1;
     for (const auto& prim_path : affected_prims)
     {
-        m_manager_->BroadcastResolvedTransform(session, prim_path, origin);
+        session->versions.RecordChange(prim_path, seq, origin);
+        m_manager_->BroadcastResolvedTransform(*session, prim_path, origin, seq);
     }
 }
 

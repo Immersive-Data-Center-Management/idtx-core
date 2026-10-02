@@ -25,6 +25,8 @@ void WriteCubeUsda(const std::filesystem::path& dst);
  *
  * Uses UsdGeomXformCommonAPI so the reader sees whatever the server
  * ultimately authored, regardless of the exact XformOp stack layout.
+ * Always reads the file on disk, never a layer the in-process server has
+ * open.
  */
 bool ReadTranslate(const std::filesystem::path& usd_file,
                    const std::string& prim_path,

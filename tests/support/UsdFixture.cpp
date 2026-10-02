@@ -6,6 +6,7 @@
 
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/base/gf/vec3f.h>
+#include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
@@ -100,7 +101,13 @@ bool ReadTranslate(const std::filesystem::path& usd_file,
                    const std::string& prim_path,
                    double& out_x, double& out_y, double& out_z)
 {
-    auto stage = pxr::UsdStage::Open(usd_file.string());
+    // Read the file from disk. UsdStage::Open(path) would go through the layer
+    // registry and return the server's in-memory root layer when the server
+    // runs in-process, which can differ from the file (e.g. after a commit,
+    // until the reload has run).
+    auto layer = pxr::SdfLayer::OpenAsAnonymous(usd_file.string());
+    if (!layer) return false;
+    auto stage = pxr::UsdStage::Open(layer);
     if (!stage) return false;
 
     if (!pxr::SdfPath::IsValidPathString(prim_path)) return false;

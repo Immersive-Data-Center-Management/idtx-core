@@ -111,7 +111,7 @@ crow::response SessionController::DeleteSession(const std::string& session_id)
 crow::response SessionController::CommitSession(const std::string& session_id)
 {
     std::string error_msg;
-    const auto status = m_manager_->CommitSession(session_id, error_msg);
+    const auto status = m_manager_->SubmitCommitSessionCommand(session_id, error_msg);
     using CommitStatus = idtx::session::SessionManager::CommitStatus;
     switch (status)
     {
@@ -126,6 +126,8 @@ crow::response SessionController::CommitSession(const std::string& session_id)
             return idtx::dto::make_error(404, "not_found", "Session not found.");
         case CommitStatus::NothingToCommit:
             return idtx::dto::make_error(409, "nothing_to_commit", error_msg);
+        case CommitStatus::Unavailable:
+            return idtx::dto::make_error(503, "unavailable", error_msg);
         case CommitStatus::WriteFailed:
         default:
             return idtx::dto::make_error(500, "commit_failed", error_msg);

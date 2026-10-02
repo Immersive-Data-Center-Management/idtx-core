@@ -39,7 +39,7 @@ SessionFlusher::~SessionFlusher()
     // a clean shutdown.
     if (m_manager_)
     {
-        try { m_manager_->FlushDirtySessions(); }
+        try { m_manager_->SubmitFlushDirtySessionsCommand(); }
         catch (...) { /* best-effort on shutdown */ }
     }
 }
@@ -55,7 +55,7 @@ void SessionFlusher::Run()
         lk.unlock();
         try
         {
-            m_manager_->FlushDirtySessions();
+            m_manager_->SubmitFlushDirtySessionsCommand();
         }
         catch (const std::exception& e)
         {

@@ -71,7 +71,7 @@ void CloseAllWebSocketConnections(idtx::session::SessionManager& manager)
         {
             std::shared_lock lk(session->clients_mutex);
             conns.reserve(session->clients.size());
-            for (auto* c : session->clients) conns.push_back(c);
+            for (const auto& [id, c] : session->clients) conns.push_back(c);
         }
         for (auto* c : conns)
         {
@@ -288,6 +288,11 @@ void TestServer::WaitReady(std::chrono::milliseconds timeout)
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }
     throw std::runtime_error("TestServer failed to become ready at " + url);
+}
+
+idtx::session::SessionManager& TestServer::session_manager() const
+{
+    return *m_ctx_->sessionManager;
 }
 
 std::string TestServer::base_http_url() const

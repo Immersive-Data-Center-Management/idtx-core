@@ -1,0 +1,5 @@
+# Python dependencies of tools/ws_load.py.
+# The protobuf runtime must not be older than the protoc used to generate the
+# modules (libprotoc 33.x from the vcpkg install).
+protobuf>=6.33.4,<7
+websockets>=14

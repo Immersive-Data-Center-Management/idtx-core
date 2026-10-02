@@ -15,12 +15,14 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <cstdlib>
 #include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 
 #include "controller/AuthController.h"
 #include "controller/HealthController.h"
@@ -71,6 +73,7 @@ struct ApplicationContext
      *   - @c IDTX_THUMBNAIL_ENABLED  (default: "true")
      *   - @c IDTX_THUMBNAIL_SIZE     (default: 256)
      *   - @c IDTX_SESSION_IDLE_TIMEOUT_SECONDS (default: 300; 0 disables the reaper)
+     *   - @c IDTX_SESSION_WORKERS    (default: number of CPU cores, capped at 4)
      *   - @c IDTX_THUMBNAIL_RENDER   (default: "real" when built with imaging;
      *     set to "placeholder" to force the metadata-only generator. Ignored
      *     unless the binary was built with @c IDTX_ENABLE_IMAGING.)
@@ -181,9 +184,18 @@ struct ApplicationContext
         // explicit DELETE.
         const auto idle_secs =
             EnvironmentUtils::get_env_u64("IDTX_SESSION_IDLE_TIMEOUT_SECONDS", 300);
+        const std::uint64_t default_workers =
+            std::clamp<std::uint64_t>(std::thread::hardware_concurrency(), 1, 4);
+
+        // Session commands are processed by a worker pool shared by all
+        // sessions; each session still runs its commands one at a time. The
+        // pool size is configurable via IDTX_SESSION_WORKERS.
+        const auto session_workers = std::max<std::uint64_t>(
+            EnvironmentUtils::get_env_u64("IDTX_SESSION_WORKERS", default_workers), 1);
         ctx.sessionManager        = std::make_shared<idtx::session::SessionManager>(
                                         *ctx.usdFileLocator,
-                                        std::chrono::seconds{idle_secs});
+                                        std::chrono::seconds{idle_secs},
+                                        static_cast<std::size_t>(session_workers));
 
         // Background worker that persists dirty session layers to their
         // sidecar files on a fixed interval (default 2 s). Configurable via

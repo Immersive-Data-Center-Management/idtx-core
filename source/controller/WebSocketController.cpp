@@ -1,6 +1,8 @@
 #include "WebSocketController.h"
 
 #include <chrono>
+#include <cstdint>
+#include <memory>
 #include <utility>
 
 #include <idtx/proto/base.pb.h>
@@ -8,6 +10,18 @@
 
 #include "session/Session.h"
 #include "session/SessionManager.h"
+
+namespace
+{
+
+using SubmitStatus = idtx::session::SessionManager::SubmitStatus;
+
+const char* RejectionReason(const SubmitStatus status)
+{
+    return status == SubmitStatus::QueueFull ? "queue_full" : "session_closing";
+}
+
+} // namespace
 
 WebSocketController::WebSocketController(std::shared_ptr<idtx::session::SessionManager> manager)
     : m_manager_(std::move(manager))
@@ -44,7 +58,9 @@ bool WebSocketController::OnAccept(const crow::request& req, void** userdata)
     }
 
     auto* ws_data = new WsUserData();
-    ws_data->session_id = std::move(sid);
+    ws_data->session_id    = std::move(sid);
+    ws_data->connection_id = m_next_connection_id_.fetch_add(1, std::memory_order_relaxed);
+    ws_data->remote_ip     = req.remote_ip_address;
     *userdata = ws_data;
 
     IDTX_LOG(IDTX_DEBUG, "Websocket accepted for session {}.", ws_data->session_id);
@@ -73,7 +89,7 @@ void WebSocketController::OnOpen(crow::websocket::connection& conn)
     // narrow race in which two upgrades slipped past OnAccept concurrently:
     // reject the second one at OnOpen by closing with a distinctive reason
     // so the client can react.
-    auto attach_status = m_manager_->AttachClient(ws_data->session_id, &conn);
+    auto attach_status = m_manager_->AttachClient(ws_data->session_id, ws_data->connection_id, &conn);
     if (attach_status == idtx::session::SessionManager::AttachStatus::SingleEditBusy)
     {
         conn.close("single_edit_busy");
@@ -87,6 +103,7 @@ void WebSocketController::OnOpen(crow::websocket::connection& conn)
         conn.close("session no longer exists");
         return;
     }
+    ws_data->session = session;
 
     // Send a Handshake so the client can fetch the initial state via REST.
     idtxcore::BaseMessage msg;
@@ -106,30 +123,42 @@ void WebSocketController::OnOpen(crow::websocket::connection& conn)
         IDTX_LOG(IDTX_ERROR, "Failed to serialize Handshake for session {}.", session->id);
     }
 
-    // Late-joiner sync: push the current server-side stage state (all prims
-    // with authored session-layer overrides) followed by a SnapshotComplete
-    // marker, so a client joining after edits — or reconnecting after a drop /
-    // server restart — sees the live state rather than only the stale REST file.
-    m_manager_->SendJoinSnapshot(session, &conn);
+    // Late-joiner sync: queue a snapshot of the current server-side stage state
+    // (all prims with authored session-layer overrides) followed by a
+    // SnapshotComplete marker, so a client joining after edits, or reconnecting
+    // after a drop or server restart, sees the live state rather than only the
+    // stale REST file. A client that cannot get a snapshot is closed, since it
+    // would otherwise edit against an unknown state.
+    const auto join_status =
+        m_manager_->SubmitJoinSnapshotCommand(ws_data->session_id, ws_data->connection_id);
+    if (join_status != SubmitStatus::Accepted)
+    {
+        IDTX_LOG(IDTX_WARN, "Closing ws for session {}: join snapshot not accepted ({}).",
+                 session->id, RejectionReason(join_status));
+        conn.close(RejectionReason(join_status));
+        return;
+    }
 
     IDTX_LOG(IDTX_INFO, "WebSocket connection opened for session {} from {}.",
-             session->id, conn.get_remote_ip());
+             session->id, ws_data->remote_ip);
 }
 
 void WebSocketController::OnClose(crow::websocket::connection& conn,
                                   const std::string& reason, uint16_t code)
 {
-    auto* ws_data = static_cast<WsUserData*>(conn.userdata());
-    if (ws_data)
+    // Crow can invoke the close handler more than once for a connection, so
+    // detach the user data before releasing it. This handler must not throw:
+    // an exception here skips crow's own cleanup of the connection.
+    std::unique_ptr<WsUserData> ws_data(static_cast<WsUserData*>(conn.userdata()));
+    conn.userdata(nullptr);
+    if (!ws_data) return;
+
+    if (auto session = ws_data->session.lock(); session && m_manager_)
     {
-        if (m_manager_ && !ws_data->session_id.empty())
-        {
-            m_manager_->DetachClient(ws_data->session_id, &conn);
-        }
-        delete ws_data;
+        m_manager_->DetachClient(*session, ws_data->connection_id);
     }
     IDTX_LOG(IDTX_INFO, "WebSocket connection closed: {} (code={}, reason={}).",
-             conn.get_remote_ip(), code, reason);
+             ws_data->remote_ip, code, reason);
 }
 
 void WebSocketController::OnMessage(crow::websocket::connection& conn,
@@ -155,20 +184,36 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
     {
         case idtxcore::BaseMessage::kXformUpdate:
         {
-            const auto& upd = msg.xform_update();
-            bool ok = m_manager_->ApplyTransformUpdate(ws_data->session_id, upd, &conn);
+            // Hand the update over to the session's consumer. When accepted,
+            // the consumer sends the Ack after applying it. This also doubles
+            // as the "you saw your own action" signal in the TfNotice
+            // broadcast model, because the listener suppresses the echo to the
+            // origin. On a client update, server_seq is the update's base.
+            const std::uint64_t request_id = msg.request_id();
+            const std::uint64_t base_seq   = msg.server_seq();
+            std::unique_ptr<const idtxcore::TransformUpdate> update(msg.release_xform_update());
+            // The update is gone once submitted; keep what a correction needs.
+            const std::string prim_path = update ? update->prim_path() : std::string();
+            const auto status = m_manager_->SubmitTransformCommand(
+                ws_data->session_id, std::move(update), ws_data->connection_id, request_id,
+                base_seq);
+            if (status == SubmitStatus::Accepted) break;
 
-            // Send an Ack back to the originator. This also doubles as the
-            // "you saw your own action" signal in the TfNotice broadcast model,
-            // because the listener suppresses the echo to the origin.
+            // Not queued: answer right away so every update gets exactly one
+            // Ack. server_seq stays 0 because no state was observed.
             idtxcore::BaseMessage ack_msg;
             ack_msg.set_session_id(ws_data->session_id);
+            ack_msg.set_request_id(request_id);
             auto* ack = ack_msg.mutable_ack();
-            ack->set_ok(ok);
-            if (!ok) ack->set_error("Failed to apply TransformUpdate");
+            ack->set_ok(false);
+            ack->set_error(RejectionReason(status));
 
             std::string payload;
             if (ack_msg.SerializeToString(&payload)) conn.send_binary(payload);
+
+            // The update was valid but not applied, while the client already
+            // shows it. A closing session needs no correction.
+            if (status == SubmitStatus::QueueFull) SubmitCorrection(*ws_data, prim_path);
             break;
         }
         case idtxcore::BaseMessage::kHandshake:
@@ -189,4 +234,13 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
                      ws_data->session_id);
             break;
     }
+}
+
+void WebSocketController::SubmitCorrection(WsUserData& ws_data, const std::string& prim_path)
+{
+    if (prim_path.empty()) return;
+
+    auto& request = ws_data.pending_corrections[prim_path];
+    if (!request) request = std::make_shared<idtx::session::PendingCorrection>(prim_path);
+    m_manager_->SubmitCorrectionCommand(ws_data.session_id, ws_data.connection_id, request);
 }

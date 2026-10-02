@@ -18,6 +18,7 @@
 // Forward declarations of the internal server types to keep this header light.
 struct ApplicationContext;
 namespace idtx::core { class Server; }
+namespace idtx::session { class SessionManager; }
 
 namespace idtx::tests
 {
@@ -53,6 +54,10 @@ public:
     std::string        base_ws_url()   const;
     std::filesystem::path uploads_root() const noexcept { return m_work_dir_ / "uploads"; }
     const std::filesystem::path& work_dir() const noexcept { return m_work_dir_; }
+
+    /// The server's session manager, for tests that inspect session state
+    /// directly.
+    idtx::session::SessionManager& session_manager() const;
 
 private:
     /// Pick a free TCP port by binding to 0.

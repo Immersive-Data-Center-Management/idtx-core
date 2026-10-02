@@ -102,7 +102,7 @@ def _copy_usd_plugins(target, source, env):
 # configure the main environment to use the different tools to build all we need
 env = Environment(
     ENV=os.environ.copy(),
-    tools=["default", "openusd", "vcpkg", "protobuf", "licenses"],
+    tools=["default", "compilation_db", "openusd", "vcpkg", "protobuf", "licenses"],
     toolpath=["scons"],
     MSVC_VERSION='14.3',
     OPENUSD_VERSION=openusd_version,
@@ -244,7 +244,10 @@ if platform_name == "linux":
 
 elif platform_name == "windows":
     env.Append(LIBS=libs + ["advapi32", "shell32", "ole32"])
-    env.Append(CPPDEFINES=["NOMINMAX", "WIN32_LEAN_AND_MEAN", "_WIN32_WINDOWS"])
+    # Pin the Windows target version for every TU. Without it, asio only enables
+    # its IOCP backend in TUs that happen to include a Windows SDK header first,
+    # which gives different asio socket layouts across TUs (an ODR violation).
+    env.Append(CPPDEFINES=["NOMINMAX", "WIN32_LEAN_AND_MEAN", "_WIN32_WINDOWS", ("_WIN32_WINNT", "0x0A00")])
     env.Append(LINKFLAGS=['/SUBSYSTEM:CONSOLE'])
     # deactivate this warning. This appears due to an issue in openUSD-26.05 where the definition of
     # 'std::ostream &Vt_ArrayEditStreamImpl()' is missing the 'VT_API' decorator
@@ -315,6 +318,37 @@ install_libs = env.Install(install_dir, _get_libs_to_install(platform_name))
 env.AddPostAction(program, _copy_usd_plugins)
 
 env.Default(program, install_ext + install_libs)
+
+# Emit compile_commands.json for IDEs (CLion, VS Code, clangd). `scons compiledb`
+# regenerates only the database without compiling anything.
+env["COMPILATIONDB_USE_ABSPATH"] = True
+compile_db = env.CompilationDatabase("compile_commands.json")
+env.NoClean(compile_db)  # keep IDE code insight alive across `scons -c`
+
+def _make_compile_db_self_contained(target, source, env):
+    # SCons invokes a bare `cl` and hands MSVC's system include dirs over via the
+    # INCLUDE environment variable, which never ends up in the database. Rewrite
+    # each entry to use the absolute cl.exe path plus explicit /I flags so IDEs
+    # can resolve the standard library without a Visual Studio environment.
+    import json
+    cl_path = env.WhereIs("cl", env["ENV"]["PATH"])
+    system_includes = [p for p in env["ENV"].get("INCLUDE", "").split(";") if p]
+    if not cl_path:
+        return
+    extra_flags = " ".join(f'"/I{os.path.normpath(p)}"' for p in system_includes)
+    db_path = str(target[0])
+    with open(db_path) as f:
+        entries = json.load(f)
+    for entry in entries:
+        if entry["command"].startswith("cl "):
+            entry["command"] = f'"{cl_path}" {entry["command"][3:]} {extra_flags}'
+    with open(db_path, "w") as f:
+        json.dump(entries, f, indent=4)
+
+if platform_name == "windows" and env.subst("$CXX") == "cl":
+    env.AddPostAction(compile_db, _make_compile_db_self_contained)
+env.Default(compile_db)
+env.Alias("compiledb", compile_db)
 
 env.CopyLicenseFiles()
 

@@ -58,7 +58,7 @@ public:
      *                        will trigger a root-layer reload on every live
      *                        session that holds the same USD file
      *                        (see @c UploadFile and
-     *                        @c idtx::session::SessionManager::ReloadSessionsForFile).
+     *                        @c idtx::session::SessionManager::SubmitReloadSessionsCommand).
      *                        Held as a @c weak_ptr because the controller
      *                        must not extend the manager's lifetime.
      */
