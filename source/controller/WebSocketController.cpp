@@ -130,7 +130,7 @@ void WebSocketController::OnOpen(crow::websocket::connection& conn)
     // stale REST file. A client that cannot get a snapshot is closed, since it
     // would otherwise edit against an unknown state.
     const auto join_status =
-        m_manager_->RequestJoinSnapshot(ws_data->session_id, ws_data->connection_id);
+        m_manager_->SubmitJoinSnapshotCommand(ws_data->session_id, ws_data->connection_id);
     if (join_status != SubmitStatus::Accepted)
     {
         IDTX_LOG(IDTX_WARN, "Closing ws for session {}: join snapshot not accepted ({}).",
@@ -194,7 +194,7 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
             std::unique_ptr<const idtxcore::TransformUpdate> update(msg.release_xform_update());
             // The update is gone once submitted; keep what a correction needs.
             const std::string prim_path = update ? update->prim_path() : std::string();
-            const auto status = m_manager_->SubmitTransformUpdate(
+            const auto status = m_manager_->SubmitTransformCommand(
                 ws_data->session_id, std::move(update), ws_data->connection_id, request_id,
                 base_seq);
             if (status == SubmitStatus::Accepted) break;
@@ -213,7 +213,7 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
 
             // The update was valid but not applied, while the client already
             // shows it. A closing session needs no correction.
-            if (status == SubmitStatus::QueueFull) RequestCorrection(*ws_data, prim_path);
+            if (status == SubmitStatus::QueueFull) SubmitCorrection(*ws_data, prim_path);
             break;
         }
         case idtxcore::BaseMessage::kHandshake:
@@ -236,11 +236,11 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
     }
 }
 
-void WebSocketController::RequestCorrection(WsUserData& ws_data, const std::string& prim_path)
+void WebSocketController::SubmitCorrection(WsUserData& ws_data, const std::string& prim_path)
 {
     if (prim_path.empty()) return;
 
     auto& request = ws_data.pending_corrections[prim_path];
     if (!request) request = std::make_shared<idtx::session::PendingCorrection>(prim_path);
-    m_manager_->RequestCorrection(ws_data.session_id, ws_data.connection_id, request);
+    m_manager_->SubmitCorrectionCommand(ws_data.session_id, ws_data.connection_id, request);
 }

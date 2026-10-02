@@ -111,7 +111,7 @@ crow::response SessionController::DeleteSession(const std::string& session_id)
 crow::response SessionController::CommitSession(const std::string& session_id)
 {
     std::string error_msg;
-    const auto status = m_manager_->CommitSession(session_id, error_msg);
+    const auto status = m_manager_->SubmitCommitSessionCommand(session_id, error_msg);
     using CommitStatus = idtx::session::SessionManager::CommitStatus;
     switch (status)
     {

@@ -159,8 +159,8 @@ public:
      *                  reloaded (the committing session). May be null.
      * @return Number of sessions that accepted the reload command.
      */
-    std::size_t ReloadSessionsForFile(const std::string& usd_file,
-                                      const Session* skip = nullptr);
+    std::size_t SubmitReloadSessionsCommand(const std::string& usd_file,
+                                            const Session* skip = nullptr);
 
     // ------------------------------------------------------------------
     // Websocket-side API
@@ -230,13 +230,13 @@ public:
      * client, and @p origin receives an Ack carrying @p request_id. If the
      * apply fails, the Ack is followed by a correction to @p origin. When not
      * accepted, no Ack is sent; the caller is responsible for reporting the
-     * failure and, for QueueFull, for calling RequestCorrection().
+     * failure and, for QueueFull, for calling SubmitCorrectionCommand().
      */
-    SubmitStatus SubmitTransformUpdate(const std::string& session_id,
-                                       std::unique_ptr<const idtxcore::TransformUpdate> update,
-                                       ConnectionId origin,
-                                       std::uint64_t request_id,
-                                       std::uint64_t base_seq) const;
+    SubmitStatus SubmitTransformCommand(const std::string& session_id,
+                                        std::unique_ptr<const idtxcore::TransformUpdate> update,
+                                        ConnectionId origin,
+                                        std::uint64_t request_id,
+                                        std::uint64_t base_seq) const;
 
     /**
      * @brief Queue a correction of @p request->prim_path for @p connection_id
@@ -247,9 +247,9 @@ public:
      * request is already queued. Never blocks; if the correction cannot be
      * queued it is dropped and a later rejection retries.
      */
-    void RequestCorrection(const std::string& session_id,
-                           ConnectionId connection_id,
-                           std::shared_ptr<PendingCorrection> request) const;
+    void SubmitCorrectionCommand(const std::string& session_id,
+                                 ConnectionId connection_id,
+                                 std::shared_ptr<PendingCorrection> request) const;
 
     /**
      * @brief Queue a join snapshot for a freshly attached connection.
@@ -261,8 +261,8 @@ public:
      * @c kSnapshotComplete frame. Because it runs in order with all other
      * commands, the snapshot is consistent with the broadcasts that follow.
      */
-    SubmitStatus RequestJoinSnapshot(const std::string& session_id,
-                                     ConnectionId connection_id);
+    SubmitStatus SubmitJoinSnapshotCommand(const std::string& session_id,
+                                           ConnectionId connection_id);
 
     // ------------------------------------------------------------------
     // Broadcast (invoked from StageNoticeListener on the consumer)
@@ -281,7 +281,7 @@ public:
 
     using CommitStatus = idtx::session::CommitStatus;
 
-    /// How long CommitSession() waits for the session's consumer.
+    /// How long SubmitCommitSessionCommand() waits for the session's consumer.
     static constexpr std::chrono::seconds kCommitTimeout{30};
 
     /**
@@ -300,7 +300,7 @@ public:
      * finish in time. Safe to call from the REST thread; must not be called
      * from a command handler.
      */
-    CommitStatus CommitSession(const std::string& session_id, std::string& out_error);
+    CommitStatus SubmitCommitSessionCommand(const std::string& session_id, std::string& out_error);
 
     // ------------------------------------------------------------------
     // Helpers
@@ -327,7 +327,7 @@ public:
      *        authoring. Driven by the background SessionFlusher. Returns the
      *        number of flush commands accepted.
      */
-    std::size_t FlushDirtySessions();
+    std::size_t SubmitFlushDirtySessionsCommand();
 
 private:
     /// Submit @p command to @p session and map the admission result.

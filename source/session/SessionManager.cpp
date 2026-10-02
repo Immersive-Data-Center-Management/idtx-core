@@ -268,7 +268,7 @@ void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
 
     // Auto-commit on destroy folds the sidecar overrides back into the original
     // file (preserving composition arcs). We deliberately do NOT trigger a
-    // ReloadSessionsForFile() here: the session is being dropped anyway.
+    // SubmitReloadSessionsCommand() here: the session is being dropped anyway.
     bool committed = false;
     if (session->auto_commit && session->stage && has_overrides)
     {
@@ -401,7 +401,7 @@ std::shared_ptr<Session> SessionManager::Create(const std::string& usd_file,
     // to the session layer (the named sidecar) so client edits compose *above*
     // the root layer. This gives us:
     //   1. `SdfLayer::Reload(force=true)` on the root layer (used by
-    //      ReloadSessionsForFile when a client uploads a replacement file)
+    //      SubmitReloadSessionsCommand when a client uploads a replacement file)
     //      does not clobber live session-authored overrides.
     //   2. StageNoticeListener can decide whether the on-disk change is
     //      visible to the client by inspecting the session layer directly.
@@ -497,14 +497,14 @@ SessionManager::FindByUsdFile(const std::string& usd_file) const
     return matches;
 }
 
-std::size_t SessionManager::ReloadSessionsForFile(const std::string& usd_file,
-                                                  const Session* skip)
+std::size_t SessionManager::SubmitReloadSessionsCommand(const std::string& usd_file,
+                                                        const Session* skip)
 {
     const auto sessions = FindByUsdFile(usd_file);
     if (sessions.empty())
     {
         IDTX_LOG(IDTX_DEBUG,
-                 "ReloadSessionsForFile('{}'): no live sessions to reload.",
+                 "SubmitReloadSessionsCommand('{}'): no live sessions to reload.",
                  usd_file);
         return 0;
     }
@@ -521,7 +521,7 @@ std::size_t SessionManager::ReloadSessionsForFile(const std::string& usd_file,
         else
         {
             IDTX_LOG(IDTX_WARN,
-                     "ReloadSessionsForFile: session {} did not accept the reload ({}).",
+                     "SubmitReloadSessionsCommand: session {} did not accept the reload ({}).",
                      session->id,
                      status == SubmitStatus::QueueFull ? "queue full" : "closing");
         }
@@ -595,7 +595,7 @@ SessionManager::SubmitStatus SessionManager::SubmitPriority(Session& session, Se
     return ToSubmitStatus(session.commands->TrySubmitPriority(std::move(command)));
 }
 
-SessionManager::SubmitStatus SessionManager::SubmitTransformUpdate(
+SessionManager::SubmitStatus SessionManager::SubmitTransformCommand(
     const std::string& session_id,
     std::unique_ptr<const idtxcore::TransformUpdate> update,
     ConnectionId origin,
@@ -604,7 +604,7 @@ SessionManager::SubmitStatus SessionManager::SubmitTransformUpdate(
     auto session = Get(session_id);
     if (!session)
     {
-        IDTX_LOG(IDTX_WARN, "SubmitTransformUpdate: unknown session {}.", session_id);
+        IDTX_LOG(IDTX_WARN, "SubmitTransformCommand: unknown session {}.", session_id);
         return SubmitStatus::UnknownSession;
     }
     if (!update) return SubmitStatus::Accepted; // nothing to apply
@@ -618,9 +618,9 @@ SessionManager::SubmitStatus SessionManager::SubmitTransformUpdate(
     return status;
 }
 
-void SessionManager::RequestCorrection(const std::string& session_id,
-                                       ConnectionId connection_id,
-                                       std::shared_ptr<PendingCorrection> request) const
+void SessionManager::SubmitCorrectionCommand(const std::string& session_id,
+                                             ConnectionId connection_id,
+                                             std::shared_ptr<PendingCorrection> request) const
 {
     if (!request) return;
     auto session = Get(session_id);
@@ -640,7 +640,7 @@ void SessionManager::RequestCorrection(const std::string& session_id,
     }
 }
 
-SessionManager::SubmitStatus SessionManager::RequestJoinSnapshot(
+SessionManager::SubmitStatus SessionManager::SubmitJoinSnapshotCommand(
     const std::string& session_id,
     ConnectionId connection_id)
 {
@@ -781,7 +781,7 @@ void SessionManager::HandleCommand(Session& session, CommitCommand& command)
         // Let every other live session bound to the same file observe the
         // new baseline (mirrors the upload-replacement reload path). Only
         // queues commands, so this is safe from the consumer.
-        ReloadSessionsForFile(session.usd_file, &session);
+        SubmitReloadSessionsCommand(session.usd_file, &session);
     }
     command.result.set_value(std::move(result));
 }
@@ -984,8 +984,8 @@ void SessionManager::BroadcastResolvedTransform(Session& session,
     }
 }
 
-SessionManager::CommitStatus SessionManager::CommitSession(const std::string& session_id,
-                                                           std::string& out_error)
+SessionManager::CommitStatus SessionManager::SubmitCommitSessionCommand(const std::string& session_id,
+                                                                        std::string& out_error)
 {
     auto session = Get(session_id);
     if (!session || !session->stage)
@@ -1112,7 +1112,7 @@ std::size_t SessionManager::ReapIdleSessions()
     return reaped.size();
 }
 
-std::size_t SessionManager::FlushDirtySessions()
+std::size_t SessionManager::SubmitFlushDirtySessionsCommand()
 {
     const auto sessions = List();
     std::size_t submitted = 0;

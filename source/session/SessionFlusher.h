@@ -6,7 +6,7 @@
  * Client edits are authored into each session's session layer (a named sidecar
  * file) but only held in memory until saved. Saving on every edit would stall
  * the authoring path with disk I/O; instead this worker wakes on a fixed
- * interval and calls SessionManager::FlushDirtySessions(), which queues a
+ * interval and calls SessionManager::SubmitFlushDirtySessionsCommand(), which queues a
  * flush command for every session flagged dirty. Each session's consumer then
  * saves its sidecar in order with its other commands. The worst-case data-loss
  * window on a crash is therefore about one flush interval.

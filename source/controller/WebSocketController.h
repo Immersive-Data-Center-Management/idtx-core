@@ -63,7 +63,7 @@ public:
     void OnMessage(crow::websocket::connection& conn, const std::string& data, bool isBinary);
 
 private:
-    void RequestCorrection(WsUserData& ws_data, const std::string& prim_path);
+    void SubmitCorrection(WsUserData& ws_data, const std::string& prim_path);
 
     std::shared_ptr<idtx::session::SessionManager> m_manager_;
 

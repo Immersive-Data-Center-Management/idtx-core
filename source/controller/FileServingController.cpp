@@ -341,7 +341,7 @@ crow::response FileServingController::UploadFile(const crow::request& req)
             {
                 try
                 {
-                    const std::size_t n = sm->ReloadSessionsForFile(
+                    const std::size_t n = sm->SubmitReloadSessionsCommand(
                         relative_path.generic_string());
                     if (n > 0)
                     {
@@ -353,7 +353,7 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                 catch (const std::exception& e)
                 {
                     IDTX_LOG(IDTX_ERROR,
-                             "ReloadSessionsForFile failed for '{}': {}",
+                             "SubmitReloadSessionsCommand failed for '{}': {}",
                              relative_path.generic_string(), e.what());
                 }
             }
