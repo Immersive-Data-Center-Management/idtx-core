@@ -117,6 +117,21 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
         return;
     }
 
+    // Soft delete / undo-delete announces itself with a SetPrimActiveBroadcast.
+    // The SetActive() authoring still fires a resync for the (de)activated prim.
+    // Dropping it here is essential, not just an optimization: an inactive prim
+    // is still readable via GetPrimAtPath, so the generic transform path below
+    // would read it and broadcast a stale transform frame in place of the
+    // delete signal, and would bump server_seq out from under the explicit
+    // broadcast.
+    if (session->set_active_in_progress.load(std::memory_order_relaxed))
+    {
+        IDTX_LOG(IDTX_DEBUG,
+                 "Ignoring stage notice in session {}: prim active-state broadcasts explicitly.",
+                 session->id);
+        return;
+    }
+
     // -----------------------------------------------------------------
     // Reload branch
     //

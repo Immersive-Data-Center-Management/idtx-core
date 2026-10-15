@@ -283,6 +283,26 @@ public:
                                          ConnectionId origin,
                                          std::uint64_t request_id) const;
 
+    /**
+     * @brief Queue a prim active-state change (soft delete / undo-delete)
+     *        requested by a client.
+     *
+     * Never blocks. When accepted, the consumer authors the `active` flag into
+     * the session layer (active=false soft-deletes the prim and prunes its
+     * subtree; active=true undoes it), broadcasts a SetPrimActiveBroadcast to
+     * every client (including @p origin) and sends @p origin an Ack carrying
+     * @p request_id. A request for an unknown prim, or a delete of a prim that
+     * is not locally deletable (introduced across a reference/payload or defined
+     * in a sublayer), is acked not-ok and nothing is authored. A request that is
+     * already in the target state is acked ok with no broadcast (idempotent).
+     * When not accepted, no Ack is sent; the caller reports the failure.
+     */
+    SubmitStatus SubmitSetPrimActiveCommand(const std::string& session_id,
+                                            std::string prim_path,
+                                            bool active,
+                                            ConnectionId origin,
+                                            std::uint64_t request_id) const;
+
     // ------------------------------------------------------------------
     // Broadcast (invoked from StageNoticeListener on the consumer)
     // ------------------------------------------------------------------
@@ -371,6 +391,7 @@ private:
     void HandleCommand(Session& session, TransformCommand& command);
     void HandleCommand(Session& session, JoinCommand& command);
     void HandleCommand(Session& session, CreatePrimCommand& command);
+    void HandleCommand(Session& session, SetPrimActiveCommand& command);
     void HandleCommand(Session& session, CommitCommand& command);
     void HandleCommand(Session& session, ReloadCommand& command);
     void HandleCommand(Session& session, FlushCommand& command);

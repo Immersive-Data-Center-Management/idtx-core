@@ -35,7 +35,6 @@
 #include "StageNoticeListener.h"
 #include "TransformDispatcher.h"
 #include "utils/Uuid.h"
-
 namespace idtx
 {
 namespace session
@@ -103,17 +102,15 @@ bool ReadResolvedTransform(const pxr::UsdStageRefPtr& stage,
 }
 
 /// Build a BaseMessage(xform_broadcast) for @p prim_path from the resolved
-/// transform on @p session's stage, without a server_seq. Returns nullopt when
-/// the prim has no readable transform.
-std::optional<idtxcore::BaseMessage> BuildBroadcastMessage(const Session& session,
-                                                           const std::string& prim_path)
+/// Assemble a BaseMessage(xform_broadcast) for @p prim_path from already-read
+/// transform values (no server_seq). The live path reads them off the stage;
+/// the join snapshot reads them straight from the session layer via Sdf.
+idtxcore::BaseMessage AssembleXformBroadcast(const Session& session,
+                                             const std::string& prim_path,
+                                             idtxcore::SeparateTransform sep,
+                                             idtxcore::Matrix4dTransform mat,
+                                             bool use_matrix)
 {
-    idtxcore::SeparateTransform sep;
-    idtxcore::Matrix4dTransform mat;
-    bool use_matrix = false;
-    if (!ReadResolvedTransform(session.stage, prim_path, sep, mat, use_matrix))
-        return std::nullopt;
-
     idtxcore::BaseMessage msg;
     msg.set_session_id(session.id);
     auto* bcast = msg.mutable_xform_broadcast();
@@ -130,6 +127,20 @@ std::optional<idtxcore::BaseMessage> BuildBroadcastMessage(const Session& sessio
     else            *upd->mutable_seperate() = std::move(sep);
 
     return msg;
+}
+
+/// transform on @p session's stage, without a server_seq. Returns nullopt when
+/// the prim has no readable transform.
+std::optional<idtxcore::BaseMessage> BuildBroadcastMessage(const Session& session,
+                                                           const std::string& prim_path)
+{
+    idtxcore::SeparateTransform sep;
+    idtxcore::Matrix4dTransform mat;
+    bool use_matrix = false;
+    if (!ReadResolvedTransform(session.stage, prim_path, sep, mat, use_matrix))
+        return std::nullopt;
+
+    return AssembleXformBroadcast(session, prim_path, std::move(sep), std::move(mat), use_matrix);
 }
 
 /// Serialized BuildBroadcastMessage() stamped with @p server_seq. Shared by
@@ -166,6 +177,27 @@ std::string SerializeCreatePrimBroadcast(const Session& session,
     if (prim.has_height) bcast->set_height(prim.height);
     if (prim.has_radius) bcast->set_radius(prim.radius);
     if (prim.has_axis)   bcast->set_axis(prim.axis);
+
+    std::string payload;
+    msg.SerializeToString(&payload);
+    return payload;
+}
+
+// Build a serialized BaseMessage(set_prim_active_broadcast) for @p prim_path
+// stamped with @p server_seq. Announces a soft delete (@p active == false) or
+// its undo. Shared by the live broadcast and the join snapshot.
+std::string SerializeSetPrimActiveBroadcast(const Session& session,
+                                            const std::string& prim_path,
+                                            bool active,
+                                            std::uint64_t server_seq)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session.id);
+    msg.set_server_seq(server_seq);
+
+    auto* bcast = msg.mutable_set_prim_active_broadcast();
+    bcast->set_prim_path(prim_path);
+    bcast->set_active(active);
 
     std::string payload;
     msg.SerializeToString(&payload);
@@ -709,6 +741,35 @@ SessionManager::SubmitStatus SessionManager::SubmitCreatePrimCommand(
     return status;
 }
 
+SessionManager::SubmitStatus SessionManager::SubmitSetPrimActiveCommand(
+    const std::string& session_id,
+    std::string prim_path,
+    bool active,
+    ConnectionId origin,
+    std::uint64_t request_id) const
+{
+    auto session = Get(session_id);
+    if (!session)
+    {
+        IDTX_LOG(IDTX_WARN, "SubmitSetPrimActiveCommand: unknown session {}.", session_id);
+        return SubmitStatus::UnknownSession;
+    }
+
+    SetPrimActiveCommand command;
+    command.prim_path  = std::move(prim_path);
+    command.active     = active;
+    command.origin     = origin;
+    command.request_id = request_id;
+
+    const auto status = Submit(*session, std::move(command));
+    if (status == SubmitStatus::QueueFull)
+    {
+        IDTX_LOG(IDTX_WARN, "Session {} command queue is full; rejecting prim active-state change.",
+                 session_id);
+    }
+    return status;
+}
+
 // ---------------------------------------------------------------------------
 // Command processing (runs on the session's consumer)
 // ---------------------------------------------------------------------------
@@ -828,6 +889,70 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
              session.id, created.prim_path, command.parent_path);
 }
 
+void SessionManager::HandleCommand(Session& session, SetPrimActiveCommand& command)
+{
+    if (!session.stage)
+    {
+        SendAck(session, command.origin, command.request_id, false, "apply_failed");
+        return;
+    }
+
+    // Author the active flag. current_origin is set for consistency with the
+    // other authoring paths; set_active_in_progress makes the TfNotice listener
+    // skip the resync this fires, because the change is announced explicitly
+    // with a SetPrimActiveBroadcast below (an inactive prim is still readable,
+    // so without the flag the generic path would broadcast a stale transform).
+    session.current_origin.store(command.origin, std::memory_order_relaxed);
+    session.set_active_in_progress.store(true, std::memory_order_relaxed);
+    PrimDispatcher::SetActiveStatus status = PrimDispatcher::SetActiveStatus::Failed;
+    try
+    {
+        status = PrimDispatcher::SetActive(session.stage, command.prim_path, command.active);
+    }
+    catch (const std::exception& e)
+    {
+        IDTX_LOG(IDTX_ERROR, "SetPrimActive threw in session {}: {}", session.id, e.what());
+    }
+    session.set_active_in_progress.store(false, std::memory_order_relaxed);
+    session.current_origin.store(0, std::memory_order_relaxed);
+
+    switch (status)
+    {
+        case PrimDispatcher::SetActiveStatus::InvalidPath:
+        case PrimDispatcher::SetActiveStatus::NotFound:
+            SendAck(session, command.origin, command.request_id, false, "unknown_prim");
+            return;
+        case PrimDispatcher::SetActiveStatus::NotDeletable:
+            SendAck(session, command.origin, command.request_id, false, "not_deletable");
+            return;
+        case PrimDispatcher::SetActiveStatus::Failed:
+            SendAck(session, command.origin, command.request_id, false, "apply_failed");
+            return;
+        case PrimDispatcher::SetActiveStatus::AlreadyInState:
+            // Idempotent: the prim already had the requested state, so there is
+            // nothing to broadcast. Ack ok with the current (unchanged) seq.
+            SendAck(session, command.origin, command.request_id, true, nullptr);
+            return;
+        case PrimDispatcher::SetActiveStatus::Ok:
+            break;
+    }
+
+    session.dirty.store(true, std::memory_order_relaxed);
+
+    // One state version for the change, stamped on the broadcast and the Ack.
+    const std::uint64_t seq = session.server_seq.fetch_add(1) + 1;
+    session.versions.RecordChange(command.prim_path, seq, command.origin);
+
+    const std::string payload =
+        SerializeSetPrimActiveBroadcast(session, command.prim_path, command.active, seq);
+    BroadcastToAll(session, payload, seq);
+
+    SendAck(session, command.origin, command.request_id, true, nullptr);
+
+    IDTX_LOG(IDTX_INFO, "Session {}: set active={} on '{}'.",
+             session.id, command.active, command.prim_path);
+}
+
 void SessionManager::HandleCommand(Session& session, JoinCommand& command)
 {
     if (!session.stage) return;
@@ -841,6 +966,14 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
         // Gather every prim path with an authored spec in the session
         // (sidecar) layer. These are exactly the prims a late joiner would
         // otherwise miss, since they are absent from the on-disk root file.
+        //
+        // The whole snapshot is built from the session layer via Sdf, never the
+        // composed stage: a soft-deleted prim is pruned from the stage (so its
+        // created children are not retrievable there), but every spec still
+        // lives in the layer. Reading at the Sdf level lets us replay the full
+        // state — including a deleted prim and its subtree — so a later undo is
+        // a one-prim active-flag toggle for the late joiner too, with no
+        // subtree snapshot needed.
         std::set<pxr::SdfPath> prim_paths;
         session_layer->Traverse(
             pxr::SdfPath::AbsoluteRootPath(),
@@ -852,15 +985,23 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
 
         // Late joiners must re-create prims authored into the session layer
         // (they are absent from the on-disk root file a joiner fetches via
-        // REST). A session-layer `def` with a built-in type is such a creation.
-        // Emit all creation frames first, ordered ancestor-before-descendant by
-        // path depth, so a nested prim's parent exists before it is created;
-        // the transform frames follow and position every prim.
+        // REST). A session-layer `def` with a built-in type is such a creation;
+        // a created-then-deleted prim keeps its def and is replayed too, then
+        // deactivated by its active frame below. Emit all creation frames first,
+        // ordered ancestor-before-descendant by path depth, so a nested prim's
+        // parent exists before it is created. Collect soft-deleted paths as we
+        // go; their active frames come last.
         std::vector<std::pair<std::size_t, std::string>> create_frames;
+        std::vector<std::string> deleted_paths;
         for (const auto& p : prim_paths)
         {
             const pxr::SdfPrimSpecHandle spec = session_layer->GetPrimAtPath(p);
-            if (!spec || spec->GetSpecifier() != pxr::SdfSpecifierDef) continue;
+            if (!spec) continue;
+
+            if (spec->HasActive() && !spec->GetActive())
+                deleted_paths.push_back(p.GetString());
+
+            if (spec->GetSpecifier() != pxr::SdfSpecifierDef) continue;
 
             const idtxcore::PrimType type =
                 PrimDispatcher::TypeFromName(spec->GetTypeName().GetString());
@@ -869,7 +1010,7 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
             CreatedPrim created;
             created.name      = p.GetName();
             created.prim_path = p.GetString();
-            PrimDispatcher::ReadAttributes(session.stage->GetPrimAtPath(p), type, created);
+            PrimDispatcher::ReadSchemaDefaults(type, created);
             create_frames.emplace_back(
                 p.GetPathElementCount(),
                 SerializeCreatePrimBroadcast(
@@ -879,14 +1020,35 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
                          [](const auto& a, const auto& b) { return a.first < b.first; });
         for (auto& cf : create_frames) frames.push_back(std::move(cf.second));
 
-        // Transform frames for every session-layer prim (created or merely
-        // overridden). By now all created prims have been announced.
+        // Transform frames for every session-layer prim that authored xform
+        // ops, read straight from the layer (see
+        // TransformDispatcher::ReadAuthoredLocalTransform). A prim with no
+        // authored ops (e.g. a bare ancestor `over`, or a just-created prim at
+        // the origin) emits none; the client already holds its base transform.
+        // By now all created prims have been announced.
         for (const auto& p : prim_paths)
         {
+            const pxr::SdfPrimSpecHandle spec = session_layer->GetPrimAtPath(p);
+            if (!spec) continue;
+
+            idtxcore::SeparateTransform sep;
+            idtxcore::Matrix4dTransform mat;
+            bool use_matrix = false;
+            if (!TransformDispatcher::ReadAuthoredLocalTransform(spec, sep, mat, use_matrix))
+                continue;
+
+            idtxcore::BaseMessage msg = AssembleXformBroadcast(
+                session, p.GetString(), std::move(sep), std::move(mat), use_matrix);
+            msg.set_server_seq(seq);
             std::string payload;
-            if (BuildBroadcastPayload(session, p.GetString(), seq, payload))
-                frames.push_back(std::move(payload));
+            if (msg.SerializeToString(&payload)) frames.push_back(std::move(payload));
         }
+
+        // Active frames last: every path now exists on the client (from REST +
+        // the create frames above), so authoring active=false prunes each
+        // subtree on the client exactly as it is pruned on the server.
+        for (const auto& path : deleted_paths)
+            frames.push_back(SerializeSetPrimActiveBroadcast(session, path, /*active=*/false, seq));
     }
 
     // Terminal marker: the client now has the full server state as of seq.
@@ -1077,6 +1239,28 @@ void SessionManager::SendCorrection(Session& session,
                                     const std::string& prim_path)
 {
     if (!session.stage || connection_id == 0) return;
+
+    // A prim that was soft-deleted after the straggler's update was created is
+    // still readable (inactive) via GetPrimAtPath, so a transform correction
+    // would wrongly re-place it. Tell the straggler to deactivate instead, with
+    // the same message the deletion used, so it converges on the delete.
+    if (pxr::SdfPath::IsValidPathString(prim_path))
+    {
+        const pxr::UsdPrim prim = session.stage->GetPrimAtPath(pxr::SdfPath(prim_path));
+        if (prim && !prim.IsActive())
+        {
+            std::shared_lock lk(session.clients_mutex);
+            auto it = session.clients.find(connection_id);
+            if (it == session.clients.end()) return;
+
+            const std::uint64_t seq = session.server_seq.fetch_add(1) + 1;
+            const std::string payload =
+                SerializeSetPrimActiveBroadcast(session, prim_path, /*active=*/false, seq);
+            it->second->send_binary(payload);
+            session.versions.RecordCorrection(connection_id, prim_path, seq);
+            return;
+        }
+    }
 
     std::optional<idtxcore::BaseMessage> msg = BuildBroadcastMessage(session, prim_path);
     if (!msg) return; // unknown prim or no readable transform: nothing to correct
