@@ -19,14 +19,18 @@
 #include <pxr/usd/sdf/changeBlock.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/primSpec.h>
+#include <pxr/usd/sdf/types.h>
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/base/gf/vec3f.h>
 
 #include <idtx/proto/base.pb.h>
 #include <idtx/proto/transform.pb.h>
+#include <idtx/proto/prim.pb.h>
 
 #include "concurrency/WorkerExecutor.h"
+#include "PrimDispatcher.h"
 #include "StageCommitter.h"
 #include "StageNoticeListener.h"
 #include "TransformDispatcher.h"
@@ -139,6 +143,33 @@ bool BuildBroadcastPayload(const Session& session,
     if (!msg) return false;
     msg->set_server_seq(server_seq);
     return msg->SerializeToString(&out_payload);
+}
+
+// Build a serialized BaseMessage(create_prim_broadcast) describing @p prim
+// (created under @p parent_path with the given @p type) stamped with
+// @p server_seq. Only the attribute fields that apply to the type are set.
+std::string SerializeCreatePrimBroadcast(const Session& session,
+                                         const std::string& parent_path,
+                                         idtxcore::PrimType type,
+                                         const CreatedPrim& prim,
+                                         std::uint64_t server_seq)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session.id);
+    msg.set_server_seq(server_seq);
+
+    auto* bcast = msg.mutable_create_prim_broadcast();
+    bcast->set_parent_path(parent_path);
+    bcast->set_prim_name(prim.name);
+    bcast->set_type(type);
+    if (prim.has_size)   bcast->set_size(prim.size);
+    if (prim.has_height) bcast->set_height(prim.height);
+    if (prim.has_radius) bcast->set_radius(prim.radius);
+    if (prim.has_axis)   bcast->set_axis(prim.axis);
+
+    std::string payload;
+    msg.SerializeToString(&payload);
+    return payload;
 }
 
 std::string SerializeAck(const Session& session,
@@ -649,6 +680,35 @@ SessionManager::SubmitStatus SessionManager::SubmitJoinSnapshotCommand(
     return Submit(*session, JoinCommand{connection_id});
 }
 
+SessionManager::SubmitStatus SessionManager::SubmitCreatePrimCommand(
+    const std::string& session_id,
+    std::string parent_path,
+    idtxcore::PrimType type,
+    ConnectionId origin,
+    std::uint64_t request_id) const
+{
+    auto session = Get(session_id);
+    if (!session)
+    {
+        IDTX_LOG(IDTX_WARN, "SubmitCreatePrimCommand: unknown session {}.", session_id);
+        return SubmitStatus::UnknownSession;
+    }
+
+    CreatePrimCommand command;
+    command.parent_path = std::move(parent_path);
+    command.type        = type;
+    command.origin      = origin;
+    command.request_id  = request_id;
+
+    const auto status = Submit(*session, std::move(command));
+    if (status == SubmitStatus::QueueFull)
+    {
+        IDTX_LOG(IDTX_WARN, "Session {} command queue is full; rejecting prim creation.",
+                 session_id);
+    }
+    return status;
+}
+
 // ---------------------------------------------------------------------------
 // Command processing (runs on the session's consumer)
 // ---------------------------------------------------------------------------
@@ -718,6 +778,59 @@ void SessionManager::HandleCommand(Session& session, TransformCommand& command)
     if (!ok) SendCorrection(session, command.origin, prim_path);
 }
 
+void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
+{
+    if (!session.stage)
+    {
+        SendAck(session, command.origin, command.request_id, false, "apply_failed");
+        return;
+    }
+
+    // Author the prim. current_origin is set for consistency with the transform
+    // path; create_in_progress makes the TfNotice listener skip the resync this
+    // authoring fires, because the creation is broadcast explicitly below.
+    CreatedPrim created;
+    session.current_origin.store(command.origin, std::memory_order_relaxed);
+    session.create_in_progress.store(true, std::memory_order_relaxed);
+    bool ok = false;
+    try
+    {
+        ok = PrimDispatcher::Create(session.stage, command.parent_path, command.type, created);
+    }
+    catch (const std::exception& e)
+    {
+        IDTX_LOG(IDTX_ERROR, "CreatePrim threw in session {}: {}", session.id, e.what());
+    }
+    session.create_in_progress.store(false, std::memory_order_relaxed);
+    session.current_origin.store(0, std::memory_order_relaxed);
+
+    if (!ok)
+    {
+        // Bad type, or a missing/forbidden parent (including gprim nesting).
+        SendAck(session, command.origin, command.request_id, false, "invalid_parent");
+        return;
+    }
+
+    session.dirty.store(true, std::memory_order_relaxed);
+
+    // One state version for the creation, stamped on the broadcast and the Ack.
+    const std::uint64_t seq = session.server_seq.fetch_add(1) + 1;
+    session.versions.RecordChange(created.prim_path, seq, command.origin);
+
+    // It's required to broadcast the prim creation back to all clients, even the one, the command
+    // was initiated by, as the prims are required to be created on the server first. The client
+    // follows and only creates based on this message.
+    const std::string payload =
+        SerializeCreatePrimBroadcast(session, command.parent_path, command.type, created, seq);
+    BroadcastToAll(session, payload, seq);
+
+    // Ack after the broadcast; SendAck stamps the current server_seq (== seq).
+    SendAck(session, command.origin, command.request_id, true, nullptr);
+
+    IDTX_LOG(IDTX_INFO, "Session {}: created '{}' under '{}'.",
+             session.id, created.prim_path, command.parent_path);
+}
+
 void SessionManager::HandleCommand(Session& session, JoinCommand& command)
 {
     if (!session.stage) return;
@@ -740,6 +853,37 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
                 else if (p.IsPropertyPath()) prim_paths.insert(p.GetPrimPath());
             });
 
+        // Late joiners must re-create prims authored into the session layer
+        // (they are absent from the on-disk root file a joiner fetches via
+        // REST). A session-layer `def` with a built-in type is such a creation.
+        // Emit all creation frames first, ordered ancestor-before-descendant by
+        // path depth, so a nested prim's parent exists before it is created;
+        // the transform frames follow and position every prim.
+        std::vector<std::pair<std::size_t, std::string>> create_frames;
+        for (const auto& p : prim_paths)
+        {
+            const pxr::SdfPrimSpecHandle spec = session_layer->GetPrimAtPath(p);
+            if (!spec || spec->GetSpecifier() != pxr::SdfSpecifierDef) continue;
+
+            const idtxcore::PrimType type =
+                PrimDispatcher::TypeFromName(spec->GetTypeName().GetString());
+            if (type == idtxcore::PRIM_TYPE_UNSPECIFIED) continue;
+
+            CreatedPrim created;
+            created.name      = p.GetName();
+            created.prim_path = p.GetString();
+            PrimDispatcher::ReadAttributes(session.stage->GetPrimAtPath(p), type, created);
+            create_frames.emplace_back(
+                p.GetPathElementCount(),
+                SerializeCreatePrimBroadcast(
+                    session, p.GetParentPath().GetString(), type, created, seq));
+        }
+        std::stable_sort(create_frames.begin(), create_frames.end(),
+                         [](const auto& a, const auto& b) { return a.first < b.first; });
+        for (auto& cf : create_frames) frames.push_back(std::move(cf.second));
+
+        // Transform frames for every session-layer prim (created or merely
+        // overridden). By now all created prims have been announced.
         for (const auto& p : prim_paths)
         {
             std::string payload;
@@ -979,6 +1123,20 @@ void SessionManager::BroadcastResolvedTransform(Session& session,
     for (const auto& [id, conn] : session.clients)
     {
         if (id == origin) continue;
+        conn->send_binary(payload);
+        session.versions.RecordSent(id, server_seq);
+    }
+}
+
+void SessionManager::BroadcastToAll(Session& session,
+                                    const std::string& payload,
+                                    std::uint64_t server_seq)
+{
+    if (payload.empty()) return;
+
+    std::shared_lock lk(session.clients_mutex);
+    for (const auto& [id, conn] : session.clients)
+    {
         conn->send_binary(payload);
         session.versions.RecordSent(id, server_seq);
     }

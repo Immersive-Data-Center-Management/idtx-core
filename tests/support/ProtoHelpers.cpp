@@ -43,6 +43,25 @@ std::string BuildTransformUpdate(const std::string& session_id,
     return out;
 }
 
+std::string BuildCreatePrimRequest(const std::string& session_id,
+                                   const std::string& parent_path,
+                                   idtxcore::PrimType type,
+                                   const std::uint64_t request_id)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session_id);
+    msg.set_request_id(request_id);
+
+    auto* req = msg.mutable_create_prim();
+    req->set_session_id(session_id);
+    req->set_parent_path(parent_path);
+    req->set_type(type);
+
+    std::string out;
+    msg.SerializeToString(&out);
+    return out;
+}
+
 bool ParseBaseMessage(const std::string& bytes, idtxcore::BaseMessage& out)
 {
     return out.ParseFromString(bytes);

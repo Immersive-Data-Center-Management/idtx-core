@@ -11,6 +11,7 @@
 
 #include <idtx/proto/base.pb.h>
 #include <idtx/proto/transform.pb.h>
+#include <idtx/proto/prim.pb.h>
 
 namespace idtx::tests
 {
@@ -28,6 +29,14 @@ std::string BuildTransformUpdate(const std::string& session_id,
                                  double tx, double ty, double tz,
                                  std::uint64_t request_id = 0,
                                  std::uint64_t base = 0);
+
+/// Build a serialized BaseMessage containing a CreatePrimRequest for @p type
+/// under @p parent_path. @p request_id is set on the enclosing BaseMessage and
+/// echoed back in the Ack.
+std::string BuildCreatePrimRequest(const std::string& session_id,
+                                   const std::string& parent_path,
+                                   idtxcore::PrimType type,
+                                   std::uint64_t request_id = 0);
 
 /// Parse a wire-format BaseMessage. Returns true on success.
 bool ParseBaseMessage(const std::string& bytes, idtxcore::BaseMessage& out);

@@ -104,6 +104,19 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
     // afterwards, so the listener only reads it.
     const ConnectionId origin = session->current_origin.load(std::memory_order_relaxed);
 
+    // Prim creation announces itself with a CreatePrimBroadcast (sent to every
+    // client, including the originator). The authoring still fires a resync
+    // notice for the new prim; dropping it here keeps the generic transform
+    // path from broadcasting the same creation a second time and bumping
+    // server_seq out from under the explicit broadcast.
+    if (session->create_in_progress.load(std::memory_order_relaxed))
+    {
+        IDTX_LOG(IDTX_DEBUG,
+                 "Ignoring stage notice in session {}: prim creation broadcasts explicitly.",
+                 session->id);
+        return;
+    }
+
     // -----------------------------------------------------------------
     // Reload branch
     //

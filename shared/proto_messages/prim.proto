@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package idtxcore;
+
+// Built-in USD prim types a client may ask the server to create. The numeric
+// values are wire-stable; append new types, never renumber. UNSPECIFIED (0) is
+// the proto3 default and is rejected by the server. The gprim types
+// (Cube..Capsule) may not be nested under another gprim; XFORM is a plain
+// transform group with no such restriction.
+enum PrimType {
+  PRIM_TYPE_UNSPECIFIED = 0;
+  PRIM_TYPE_CUBE = 1;
+  PRIM_TYPE_SPHERE = 2;
+  PRIM_TYPE_CONE = 3;
+  PRIM_TYPE_CYLINDER = 4;
+  PRIM_TYPE_CAPSULE = 5;
+  PRIM_TYPE_XFORM = 6;
+}
+
+// Client -> server. Ask the server to author a new built-in primitive of
+// @c type as a child of @c parent_path. The server picks a unique prim name
+// under the parent, authors the prim with its schema defaults into the session
+// layer and reports the result in a CreatePrimBroadcast. The parent must be an
+// existing prim (or the absolute root "/") and must not itself be a gprim: USD
+// forbids nesting gprims, so a parent that is or descends from a gprim is
+// rejected.
+message CreatePrimRequest {
+  string session_id = 1;
+  string parent_path = 2;
+  PrimType type = 3;
+}
+
+// Server -> all clients (including the originator) and replayed in the join
+// snapshot for late joiners. Describes a primitive the server created: its
+// parent, the server-assigned name, the type and the default attribute values
+// that were authored. Only the attribute fields that apply to @c type are set
+// (has-field semantics via proto3 optional): Cube -> size; Sphere -> radius;
+// Cone/Cylinder/Capsule -> height, radius, axis; Xform -> none.
+message CreatePrimBroadcast {
+  string parent_path = 1;
+  string prim_name = 2;
+  PrimType type = 3;
+  optional double size = 4;
+  optional double height = 5;
+  optional double radius = 6;
+  optional string axis = 7;
+}

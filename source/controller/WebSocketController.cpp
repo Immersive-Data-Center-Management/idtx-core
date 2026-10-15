@@ -221,7 +221,33 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
             IDTX_LOG(IDTX_DEBUG, "Handshake message received from client on session {}.",
                      ws_data->session_id);
             break;
+        case idtxcore::BaseMessage::kCreatePrim:
+        {
+            // Queue the creation for the session's consumer. When accepted, the
+            // consumer authors the prim, broadcasts the creation to every client
+            // (including this one) and sends this client the Ack. On a bad
+            // type/parent it acks not-ok. Only a queue the session could not
+            // accept the request onto is answered here.
+            const std::uint64_t request_id = msg.request_id();
+            const idtxcore::CreatePrimRequest& req = msg.create_prim();
+            const auto status = m_manager_->SubmitCreatePrimCommand(
+                ws_data->session_id, req.parent_path(), req.type(),
+                ws_data->connection_id, request_id);
+            if (status == SubmitStatus::Accepted) break;
+
+            idtxcore::BaseMessage ack_msg;
+            ack_msg.set_session_id(ws_data->session_id);
+            ack_msg.set_request_id(request_id);
+            auto* ack = ack_msg.mutable_ack();
+            ack->set_ok(false);
+            ack->set_error(RejectionReason(status));
+
+            std::string payload;
+            if (ack_msg.SerializeToString(&payload)) conn.send_binary(payload);
+            break;
+        }
         case idtxcore::BaseMessage::kXformBroadcast:
+        case idtxcore::BaseMessage::kCreatePrimBroadcast:
         case idtxcore::BaseMessage::kAck:
         case idtxcore::BaseMessage::kError:
         case idtxcore::BaseMessage::kSnapshotComplete:

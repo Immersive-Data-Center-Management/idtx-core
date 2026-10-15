@@ -32,6 +32,7 @@
 #include "google/protobuf/unknown_field_set.h"
 #include "transform.pb.h"
 #include "session.pb.h"
+#include "prim.pb.h"
 // @@protoc_insertion_point(includes)
 
 // Must be included last.
@@ -523,6 +524,8 @@ class BaseMessage final : public ::google::protobuf::Message
     kAck = 5,
     kError = 6,
     kSnapshotComplete = 7,
+    kCreatePrim = 10,
+    kCreatePrimBroadcast = 11,
     MESSAGE_NOT_SET = 0,
   };
   static constexpr int kIndexInFileMessages = 2;
@@ -621,6 +624,8 @@ class BaseMessage final : public ::google::protobuf::Message
     kAckFieldNumber = 5,
     kErrorFieldNumber = 6,
     kSnapshotCompleteFieldNumber = 7,
+    kCreatePrimFieldNumber = 10,
+    kCreatePrimBroadcastFieldNumber = 11,
   };
   // optional string session_id = 1;
   bool has_session_id() const;
@@ -772,6 +777,44 @@ class BaseMessage final : public ::google::protobuf::Message
   ::idtxcore::SnapshotComplete* PROTOBUF_NONNULL _internal_mutable_snapshot_complete();
 
   public:
+  // .idtxcore.CreatePrimRequest create_prim = 10;
+  bool has_create_prim() const;
+  private:
+  bool _internal_has_create_prim() const;
+
+  public:
+  void clear_create_prim() ;
+  const ::idtxcore::CreatePrimRequest& create_prim() const;
+  [[nodiscard]] ::idtxcore::CreatePrimRequest* PROTOBUF_NULLABLE release_create_prim();
+  ::idtxcore::CreatePrimRequest* PROTOBUF_NONNULL mutable_create_prim();
+  void set_allocated_create_prim(::idtxcore::CreatePrimRequest* PROTOBUF_NULLABLE value);
+  void unsafe_arena_set_allocated_create_prim(::idtxcore::CreatePrimRequest* PROTOBUF_NULLABLE value);
+  ::idtxcore::CreatePrimRequest* PROTOBUF_NULLABLE unsafe_arena_release_create_prim();
+
+  private:
+  const ::idtxcore::CreatePrimRequest& _internal_create_prim() const;
+  ::idtxcore::CreatePrimRequest* PROTOBUF_NONNULL _internal_mutable_create_prim();
+
+  public:
+  // .idtxcore.CreatePrimBroadcast create_prim_broadcast = 11;
+  bool has_create_prim_broadcast() const;
+  private:
+  bool _internal_has_create_prim_broadcast() const;
+
+  public:
+  void clear_create_prim_broadcast() ;
+  const ::idtxcore::CreatePrimBroadcast& create_prim_broadcast() const;
+  [[nodiscard]] ::idtxcore::CreatePrimBroadcast* PROTOBUF_NULLABLE release_create_prim_broadcast();
+  ::idtxcore::CreatePrimBroadcast* PROTOBUF_NONNULL mutable_create_prim_broadcast();
+  void set_allocated_create_prim_broadcast(::idtxcore::CreatePrimBroadcast* PROTOBUF_NULLABLE value);
+  void unsafe_arena_set_allocated_create_prim_broadcast(::idtxcore::CreatePrimBroadcast* PROTOBUF_NULLABLE value);
+  ::idtxcore::CreatePrimBroadcast* PROTOBUF_NULLABLE unsafe_arena_release_create_prim_broadcast();
+
+  private:
+  const ::idtxcore::CreatePrimBroadcast& _internal_create_prim_broadcast() const;
+  ::idtxcore::CreatePrimBroadcast* PROTOBUF_NONNULL _internal_mutable_create_prim_broadcast();
+
+  public:
   void clear_message();
   MessageCase message_case() const;
   // @@protoc_insertion_point(class_scope:idtxcore.BaseMessage)
@@ -783,11 +826,13 @@ class BaseMessage final : public ::google::protobuf::Message
   void set_has_ack();
   void set_has_error();
   void set_has_snapshot_complete();
+  void set_has_create_prim();
+  void set_has_create_prim_broadcast();
   inline bool has_message() const;
   inline void clear_has_message();
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<4, 9,
-                                   6, 47,
+  static const ::google::protobuf::internal::TcParseTable<4, 11,
+                                   8, 47,
                                    2>
       _table_;
 
@@ -820,6 +865,8 @@ class BaseMessage final : public ::google::protobuf::Message
       ::google::protobuf::Message* PROTOBUF_NULLABLE ack_;
       ::google::protobuf::Message* PROTOBUF_NULLABLE error_;
       ::google::protobuf::Message* PROTOBUF_NULLABLE snapshot_complete_;
+      ::google::protobuf::Message* PROTOBUF_NULLABLE create_prim_;
+      ::google::protobuf::Message* PROTOBUF_NULLABLE create_prim_broadcast_;
     } message_;
     ::uint32_t _oneof_case_[1];
     PROTOBUF_TSAN_DECLARE_MEMBER
@@ -1628,6 +1675,148 @@ inline ::idtxcore::SnapshotComplete* PROTOBUF_NONNULL BaseMessage::mutable_snaps
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   ::idtxcore::SnapshotComplete* _msg = _internal_mutable_snapshot_complete();
   // @@protoc_insertion_point(field_mutable:idtxcore.BaseMessage.snapshot_complete)
+  return _msg;
+}
+
+// .idtxcore.CreatePrimRequest create_prim = 10;
+inline bool BaseMessage::has_create_prim() const {
+  return message_case() == kCreatePrim;
+}
+inline bool BaseMessage::_internal_has_create_prim() const {
+  return message_case() == kCreatePrim;
+}
+inline void BaseMessage::set_has_create_prim() {
+  _impl_._oneof_case_[0] = kCreatePrim;
+}
+inline ::idtxcore::CreatePrimRequest* PROTOBUF_NULLABLE BaseMessage::release_create_prim() {
+  // @@protoc_insertion_point(field_release:idtxcore.BaseMessage.create_prim)
+  if (message_case() == kCreatePrim) {
+    clear_has_message();
+    auto* temp = reinterpret_cast<::idtxcore::CreatePrimRequest*>(_impl_.message_.create_prim_);
+    if (GetArena() != nullptr) {
+      temp = ::google::protobuf::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.message_.create_prim_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::idtxcore::CreatePrimRequest& BaseMessage::_internal_create_prim() const {
+  return message_case() == kCreatePrim ? static_cast<const ::idtxcore::CreatePrimRequest&>(*reinterpret_cast<::idtxcore::CreatePrimRequest*>(_impl_.message_.create_prim_))
+                     : reinterpret_cast<const ::idtxcore::CreatePrimRequest&>(::idtxcore::_CreatePrimRequest_default_instance_);
+}
+inline const ::idtxcore::CreatePrimRequest& BaseMessage::create_prim() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.BaseMessage.create_prim)
+  return _internal_create_prim();
+}
+inline ::idtxcore::CreatePrimRequest* PROTOBUF_NULLABLE BaseMessage::unsafe_arena_release_create_prim() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:idtxcore.BaseMessage.create_prim)
+  if (message_case() == kCreatePrim) {
+    clear_has_message();
+    auto* temp = reinterpret_cast<::idtxcore::CreatePrimRequest*>(_impl_.message_.create_prim_);
+    _impl_.message_.create_prim_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void BaseMessage::unsafe_arena_set_allocated_create_prim(
+    ::idtxcore::CreatePrimRequest* PROTOBUF_NULLABLE value) {
+  // We rely on the oneof clear method to free the earlier contents
+  // of this oneof. We can directly use the pointer we're given to
+  // set the new value.
+  clear_message();
+  if (value) {
+    set_has_create_prim();
+    _impl_.message_.create_prim_ = reinterpret_cast<::google::protobuf::Message*>(value);
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:idtxcore.BaseMessage.create_prim)
+}
+inline ::idtxcore::CreatePrimRequest* PROTOBUF_NONNULL BaseMessage::_internal_mutable_create_prim() {
+  if (message_case() != kCreatePrim) {
+    clear_message();
+    set_has_create_prim();
+    _impl_.message_.create_prim_ = reinterpret_cast<::google::protobuf::Message*>(
+        ::google::protobuf::Message::DefaultConstruct<::idtxcore::CreatePrimRequest>(GetArena()));
+  }
+  return reinterpret_cast<::idtxcore::CreatePrimRequest*>(_impl_.message_.create_prim_);
+}
+inline ::idtxcore::CreatePrimRequest* PROTOBUF_NONNULL BaseMessage::mutable_create_prim()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  ::idtxcore::CreatePrimRequest* _msg = _internal_mutable_create_prim();
+  // @@protoc_insertion_point(field_mutable:idtxcore.BaseMessage.create_prim)
+  return _msg;
+}
+
+// .idtxcore.CreatePrimBroadcast create_prim_broadcast = 11;
+inline bool BaseMessage::has_create_prim_broadcast() const {
+  return message_case() == kCreatePrimBroadcast;
+}
+inline bool BaseMessage::_internal_has_create_prim_broadcast() const {
+  return message_case() == kCreatePrimBroadcast;
+}
+inline void BaseMessage::set_has_create_prim_broadcast() {
+  _impl_._oneof_case_[0] = kCreatePrimBroadcast;
+}
+inline ::idtxcore::CreatePrimBroadcast* PROTOBUF_NULLABLE BaseMessage::release_create_prim_broadcast() {
+  // @@protoc_insertion_point(field_release:idtxcore.BaseMessage.create_prim_broadcast)
+  if (message_case() == kCreatePrimBroadcast) {
+    clear_has_message();
+    auto* temp = reinterpret_cast<::idtxcore::CreatePrimBroadcast*>(_impl_.message_.create_prim_broadcast_);
+    if (GetArena() != nullptr) {
+      temp = ::google::protobuf::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.message_.create_prim_broadcast_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::idtxcore::CreatePrimBroadcast& BaseMessage::_internal_create_prim_broadcast() const {
+  return message_case() == kCreatePrimBroadcast ? static_cast<const ::idtxcore::CreatePrimBroadcast&>(*reinterpret_cast<::idtxcore::CreatePrimBroadcast*>(_impl_.message_.create_prim_broadcast_))
+                     : reinterpret_cast<const ::idtxcore::CreatePrimBroadcast&>(::idtxcore::_CreatePrimBroadcast_default_instance_);
+}
+inline const ::idtxcore::CreatePrimBroadcast& BaseMessage::create_prim_broadcast() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.BaseMessage.create_prim_broadcast)
+  return _internal_create_prim_broadcast();
+}
+inline ::idtxcore::CreatePrimBroadcast* PROTOBUF_NULLABLE BaseMessage::unsafe_arena_release_create_prim_broadcast() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:idtxcore.BaseMessage.create_prim_broadcast)
+  if (message_case() == kCreatePrimBroadcast) {
+    clear_has_message();
+    auto* temp = reinterpret_cast<::idtxcore::CreatePrimBroadcast*>(_impl_.message_.create_prim_broadcast_);
+    _impl_.message_.create_prim_broadcast_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void BaseMessage::unsafe_arena_set_allocated_create_prim_broadcast(
+    ::idtxcore::CreatePrimBroadcast* PROTOBUF_NULLABLE value) {
+  // We rely on the oneof clear method to free the earlier contents
+  // of this oneof. We can directly use the pointer we're given to
+  // set the new value.
+  clear_message();
+  if (value) {
+    set_has_create_prim_broadcast();
+    _impl_.message_.create_prim_broadcast_ = reinterpret_cast<::google::protobuf::Message*>(value);
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:idtxcore.BaseMessage.create_prim_broadcast)
+}
+inline ::idtxcore::CreatePrimBroadcast* PROTOBUF_NONNULL BaseMessage::_internal_mutable_create_prim_broadcast() {
+  if (message_case() != kCreatePrimBroadcast) {
+    clear_message();
+    set_has_create_prim_broadcast();
+    _impl_.message_.create_prim_broadcast_ = reinterpret_cast<::google::protobuf::Message*>(
+        ::google::protobuf::Message::DefaultConstruct<::idtxcore::CreatePrimBroadcast>(GetArena()));
+  }
+  return reinterpret_cast<::idtxcore::CreatePrimBroadcast*>(_impl_.message_.create_prim_broadcast_);
+}
+inline ::idtxcore::CreatePrimBroadcast* PROTOBUF_NONNULL BaseMessage::mutable_create_prim_broadcast()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  ::idtxcore::CreatePrimBroadcast* _msg = _internal_mutable_create_prim_broadcast();
+  // @@protoc_insertion_point(field_mutable:idtxcore.BaseMessage.create_prim_broadcast)
   return _msg;
 }
 

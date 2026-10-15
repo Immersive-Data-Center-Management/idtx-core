@@ -264,6 +264,25 @@ public:
     SubmitStatus SubmitJoinSnapshotCommand(const std::string& session_id,
                                            ConnectionId connection_id);
 
+    /**
+     * @brief Queue a built-in primitive creation requested by a client.
+     *
+     * Never blocks. When accepted, the consumer authors a new gprim of @p type
+     * under @p parent_path into the session layer with its schema defaults,
+     * assigns it a unique name, broadcasts the creation to every client of the
+     * session (including @p origin) and sends @p origin an Ack carrying
+     * @p request_id. A request with an unknown type or an invalid/forbidden
+     * parent (missing, or a gprim/descendant of one) is acked as not ok and
+     * nothing is authored. When not accepted, no Ack is sent; the caller
+     * reports the failure. Creation is additive with a server-chosen unique
+     * name, so there is no base_seq/staleness check.
+     */
+    SubmitStatus SubmitCreatePrimCommand(const std::string& session_id,
+                                         std::string parent_path,
+                                         idtxcore::PrimType type,
+                                         ConnectionId origin,
+                                         std::uint64_t request_id) const;
+
     // ------------------------------------------------------------------
     // Broadcast (invoked from StageNoticeListener on the consumer)
     // ------------------------------------------------------------------
@@ -278,6 +297,16 @@ public:
                                     const std::string& prim_path,
                                     ConnectionId origin,
                                     std::uint64_t server_seq);
+
+    /**
+     * @brief Send an already-serialized frame to every connected client of
+     *        @p session (including the originator) and record @p server_seq as
+     *        sent to each. Used for prim-creation broadcasts, which — unlike
+     *        transforms — are echoed back to the client that triggered them.
+     */
+    void BroadcastToAll(Session& session,
+                        const std::string& payload,
+                        std::uint64_t server_seq);
 
     using CommitStatus = idtx::session::CommitStatus;
 
@@ -341,6 +370,7 @@ private:
 
     void HandleCommand(Session& session, TransformCommand& command);
     void HandleCommand(Session& session, JoinCommand& command);
+    void HandleCommand(Session& session, CreatePrimCommand& command);
     void HandleCommand(Session& session, CommitCommand& command);
     void HandleCommand(Session& session, ReloadCommand& command);
     void HandleCommand(Session& session, FlushCommand& command);

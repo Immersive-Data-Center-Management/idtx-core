@@ -554,6 +554,57 @@ TEST_CASE("queue: join snapshot matches the state and precedes later broadcasts"
     CHECK(TranslateX(next.front()) == doctest::Approx(4.0));
 }
 
+TEST_CASE("queue: join snapshot replays created prims before SnapshotComplete")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "collaborative_edit");
+
+    WsTestClient a;
+    Join(a, server, sid);
+
+    // A creates a Cube under /Root; capture the server-assigned name.
+    a.SendBinary(idtx::tests::BuildCreatePrimRequest(sid, "/Root", idtxcore::PRIM_TYPE_CUBE, 1));
+    const auto created = Collect(
+        a, 1, std::chrono::seconds{5},
+        [](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kCreatePrimBroadcast;
+        });
+    REQUIRE(created.size() == 1);
+    const std::string name = created.front().create_prim_broadcast().prim_name();
+
+    // A late joiner B must receive a CreatePrimBroadcast for that prim before
+    // SnapshotComplete, so it can reconstruct a prim the root file lacks.
+    WsTestClient b;
+    auto conn = b.Connect("127.0.0.1", server.port(), "/ws?sid=" + sid);
+    REQUIRE(conn.handshake_ok);
+
+    bool complete = false;
+    std::optional<idtxcore::BaseMessage> create_frame;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (!complete && std::chrono::steady_clock::now() < deadline)
+    {
+        auto frame = b.ReadBinary(std::chrono::milliseconds{2000});
+        if (!frame) break;
+        idtxcore::BaseMessage msg;
+        if (!idtx::tests::ParseBaseMessage(*frame, msg)) continue;
+        if (msg.message_case() == idtxcore::BaseMessage::kCreatePrimBroadcast
+            && msg.create_prim_broadcast().prim_name() == name)
+        {
+            create_frame = msg; // recorded before any SnapshotComplete breaks the loop
+        }
+        else if (IsSnapshotComplete(msg))
+        {
+            complete = true;
+        }
+    }
+    REQUIRE(complete);
+    REQUIRE(create_frame.has_value()); // seen strictly before SnapshotComplete
+    CHECK(create_frame->create_prim_broadcast().parent_path() == "/Root");
+    CHECK(create_frame->create_prim_broadcast().type() == idtxcore::PRIM_TYPE_CUBE);
+    CHECK(create_frame->create_prim_broadcast().has_size());
+}
+
 TEST_CASE("queue: commit writes every acknowledged update to the file")
 {
     TestServer server;
