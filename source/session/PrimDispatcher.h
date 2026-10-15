@@ -58,7 +58,7 @@ public:
      *
      * Must be called from the session's command consumer, which has exclusive
      * access to the stage, with the stage's edit target set to the session
-     * layer. Authors inside an SdfChangeBlock so a single notice fires.
+     * layer.
      *
      * Validation (all checked before anything is authored, so a failure leaves
      * the stage untouched):

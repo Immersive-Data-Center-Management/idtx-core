@@ -817,6 +817,9 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
     const std::uint64_t seq = session.server_seq.fetch_add(1) + 1;
     session.versions.RecordChange(created.prim_path, seq, command.origin);
 
+    // It's safe to broadcast the prim creation back to all clients, eve n the one, the command
+    // was initiated by, as the prims are required to be created on the server first. The
+    // client follows and only creates based on this message.
     const std::string payload =
         SerializeCreatePrimBroadcast(session, command.parent_path, command.type, created, seq);
     BroadcastToAll(session, payload, seq);
