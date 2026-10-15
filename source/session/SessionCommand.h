@@ -19,6 +19,7 @@
 #include <variant>
 
 #include <idtx/proto/transform.pb.h>
+#include <idtx/proto/prim.pb.h>
 
 namespace idtx::session
 {
@@ -103,6 +104,31 @@ struct JoinCommand
 };
 
 /**
+ * @brief Create a built-in primitive requested by a websocket client.
+ *
+ * The consumer authors a new gprim of @c type under @c parent_path into the
+ * session layer with its schema defaults, assigns it a unique name, broadcasts
+ * the creation to every client (including @c origin) and sends @c origin an
+ * Ack carrying @c request_id. The members are plain values, so the command is
+ * trivially nothrow-movable as the mailbox requires.
+ */
+struct CreatePrimCommand
+{
+    std::string        parent_path;
+    idtxcore::PrimType type{idtxcore::PRIM_TYPE_UNSPECIFIED};
+
+    // Connection that sent the request; it receives the Ack and, like every
+    // other client, the creation broadcast.
+    ConnectionId origin{};
+
+    // Client-assigned id echoed back in the Ack (0 if the client sent none).
+    std::uint64_t request_id{};
+
+    std::chrono::steady_clock::time_point received_at{
+        std::chrono::steady_clock::now()};
+};
+
+/**
  * @brief Commit the session's overrides into the original USD file.
  *
  * The submitter waits on the future obtained from @c result.
@@ -157,6 +183,7 @@ struct CorrectionCommand
 using SessionCommand = std::variant<
     TransformCommand,
     JoinCommand,
+    CreatePrimCommand,
     CommitCommand,
     ReloadCommand,
     FlushCommand,

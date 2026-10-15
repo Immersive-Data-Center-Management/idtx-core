@@ -102,6 +102,17 @@ struct Session
     // same reason as current_origin.
     std::atomic<bool>                                 reload_in_progress{false};
 
+    // Set by the create-primitive command around the authoring call, and
+    // cleared once it returns. While it is true the listener skips the
+    // notice-driven transform broadcast for the change: prim creation fires a
+    // resync notice for the new prim, but the creation is announced explicitly
+    // with a CreatePrimBroadcast (which also reaches the originator), so the
+    // generic transform path must not also broadcast it. The authoring call
+    // fires the notice synchronously on the consumer while this flag is set.
+    // Written by the consumer only; atomic for the same reason as
+    // current_origin.
+    std::atomic<bool>                                 create_in_progress{false};
+
     // Per-session state version. Incremented once for every stage change
     // observed by the listener and for every correction, and stamped on outgoing broadcasts, acks and
     // snapshots as BaseMessage.server_seq. Atomic for the same reason as

@@ -54,7 +54,8 @@ def _compile_protobuf(env):
         f"--proto_path={os.path.normpath(shared_proto_dir)}",
         f"{os.path.normpath('base.proto')}",
         f"{os.path.normpath('transform.proto')}",
-        f"{os.path.normpath('session.proto')}"
+        f"{os.path.normpath('session.proto')}",
+        f"{os.path.normpath('prim.proto')}"
     ])
     if result.returncode != 0:
         print(f"Failed to compile protobuffer")
