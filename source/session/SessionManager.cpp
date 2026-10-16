@@ -987,7 +987,7 @@ void SessionManager::ProcessCommand(Session& session, SessionCommand&& command)
         // Every other command only works on layers its stage already uses,
         // and a reload of one of those pauses this session instead.
         std::shared_lock<idtx::concurrency::SharedLayerLock> layers;
-        // Only the commands checked here will make the schedular try to take the lock.
+        // Only the commands checked here will make the scheduler try to take the lock.
         if (std::holds_alternative<PayloadCommand>(command)
             || std::holds_alternative<SetPrimActiveCommand>(command))
         {
@@ -998,12 +998,12 @@ void SessionManager::ProcessCommand(Session& session, SessionCommand&& command)
                         if (auto resumed = scheduler.lock()) resumed->Resume();
                     }))
             {
-                // Commands for which the schedular needs the lock but cannot have it yet are deferred.
+                // Commands for which the scheduler needs the lock but cannot have it yet are deferred.
                 session.commands->DeferCurrent(std::move(command));
                 return;
             }
-            // Return the lock in its locked state (std::adopt_lock) to layers,
-            // so it is not locked again later by a consumer/worker on a different thread.
+            // Transfer ownership of the lock without another lock attempt (std::adopt_lock) to layers,
+            // so it is not locked again later, until layers is destroyed.
             // std::shared_lock RAII ensures the lock is released at the end of this try block,
             // when layers is destroyed, i.e. after the command has been handled.
             // Fwiw: If the handler below throws, the same destructor runs during stack unwinding,

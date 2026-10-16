@@ -255,7 +255,7 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
 
     if (affected_prims.empty()) return;
 
-    /* TODO: IDTX:DEBUG is not filtered in release builds and the logger directly writes to std::cout in IDTXCoreLogger.h.
+    /* TODO: IDTX_DEBUG is not filtered in release builds and the logger directly writes to std::cout in IDTXCoreLogger.h.
      * std::cout will lock for this. Which means that any change notice potentially has to wait on a debug line.
      * This lock is the same for every session and every log because the logger always writes to std::cout.
      * Ultimately, the logger should get a proper implementation that works well in a multi-threaded environment
@@ -263,7 +263,7 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
      *
      * Note also: While std::cout currently ensures that there are no races on the FILE itself,
      * it does not prevent line interleaving. It locks for every "<<", which means between them another thread could
-     * acquire the lock and write it's content into the underlying buffer inbetween.
+     * acquire the lock and write its content into the underlying buffer in between.
      */
     /* Disabled for the reasons above.
      *IDTX_LOG(IDTX_DEBUG, "Stage change in session {} affects {} prim(s); broadcasting.",
