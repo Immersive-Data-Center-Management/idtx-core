@@ -269,6 +269,28 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                     idtx::utils::UsdFileLocator::StatusToString(vstatus));
         }
 
+        // An upload that may replace an existing file takes the session
+        // manager's file-write slot, which commits hold while they write a
+        // file and until it is reloaded. So an upload and a commit never write
+        // the same file at once, and neither reloads or flattens the other's
+        // half-finished state. Taken before the existence check below, so
+        // that check and the replacement happen under it. Released when this
+        // handler returns, or, after a replacement, once the reload is done.
+        std::shared_ptr<void> write_slot;
+        if (overwrite)
+        {
+            if (auto sm = m_session_manager_.lock())
+            {
+                write_slot = sm->AcquireFileWriteSlot(
+                    idtx::session::SessionManager::kCommitTimeout);
+                if (!write_slot)
+                {
+                    return idtx::dto::make_error(503, "unavailable",
+                        "Another commit or upload is still writing; retry later.");
+                }
+            }
+        }
+
         // Overwrite check (before mkdir so we don't churn the filesystem for
         // rejected requests). We also remember whether the target existed
         // before the rename so we know, after the write succeeds, whether
@@ -348,7 +370,8 @@ crow::response FileServingController::UploadFile(const crow::request& req)
             {
                 try
                 {
-                    if (sm->ReloadSharedLayer(relative_path.generic_string()))
+                    if (sm->ReloadSharedLayer(relative_path.generic_string(),
+                                              std::move(write_slot)))
                     {
                         IDTX_LOG(IDTX_INFO,
                                  "Upload replaced '{}'; queued a reload of its layer.",

@@ -141,6 +141,7 @@ Error responses share the common `{ "error": "<code>", "message": "<text>" }` sh
 | 409    | `conflict`          | Target file exists and `overwrite` is not `true`. |
 | 413    | `payload_too_large` | Body exceeds `IDTX_UPLOAD_MAX_BYTES` (default 500 MiB). |
 | 500    | `internal_error`    | I/O error writing the file or preparing the target directory. |
+| 503    | `unavailable`       | `overwrite` is `true` and a commit or another replacing upload was still writing for 30 seconds. Commits and replacing uploads write one at a time; retry later. |
 
 #### Thumbnail generation
 
@@ -180,7 +181,7 @@ Clients join a session via a websocket at `/ws?sid=<session id>` and exchange bi
 - **Corrections.** After `apply_failed` or `queue_full` the server sends the prim's current state to the rejected client only, as a `TransformBroadcast` with a new `server_seq` (the stage does not change). Updates of that prim the client sent before it received the correction are rejected as `stale`, so the correction is what the client ends with. Nothing is sent for a prim that does not exist.
 - **Client rules.** Keep the highest `server_seq` received in any message (broadcast, `SnapshotComplete`, `Ack`) once the message has been applied, and send it as the base of every `TransformUpdate`. Do not send updates before `SnapshotComplete`. Show local changes immediately and apply every `TransformBroadcast` (snapshot, live, correction) in arrival order, which is the server order. Acks need no action: after `stale` the newer state has arrived or is on its way, after `apply_failed` or `queue_full` a correction follows, `session_closing` means the session is gone, and `invalid_base` indicates a client bug. With these rules the last message a client receives for a prim carries the server state of that prim. They rely on absolute (last-write-wins) transforms; relative edits would need client-side prediction.
 - **Join snapshot.** After the `Handshake`, a joining client receives one `TransformBroadcast` per prim with session overrides, followed by `SnapshotComplete`, all carrying the same `server_seq`. Live broadcasts can arrive before the snapshot; the snapshot frames supersede them.
-- **Commit.** `POST /api/v1/sessions/<id>/commit` is queued behind all previously received updates. It answers `200` with `{"committed": true}`, `409 nothing_to_commit`, or `503 unavailable` when the session is shutting down.
+- **Commit.** `POST /api/v1/sessions/<id>/commit` is queued behind all previously received updates. It answers `200` with `{"committed": true}` once the file is written and every session using it has been updated, `409 nothing_to_commit`, `503 unavailable` when nothing was queued (the session is shutting down, its queue is full, or another commit or upload of an existing file is still writing; retrying later may succeed), or `202` with `{"committed": false, "pending": true}` when the commit is queued but did not finish within 30 seconds. A pending commit still runs; do not retry it.
 
 | Variable               | Default          | Meaning                                                                                                                        |
 |------------------------|------------------|--------------------------------------------------------------------------------------------------------------------------------|

@@ -155,9 +155,29 @@ public:
      * Never blocks. Safe to call from any thread.
      *
      * @param usd_file  Uploads-relative path of the file that was replaced.
+     * @param hold      Released only once the reload has finished; pass the
+     *                  slot from AcquireFileWriteSlot() so no commit or other
+     *                  upload writes the file before its layer is reloaded.
      * @return true if the reload was queued.
      */
-    bool ReloadSharedLayer(const std::string& usd_file);
+    bool ReloadSharedLayer(const std::string& usd_file, std::shared_ptr<void> hold = {});
+
+    /**
+     * @brief Take the single slot that commits hold while they write a file
+     *        and until its layer is reloaded.
+     *
+     * An upload that replaces an existing file holds it while it writes, so
+     * an upload and a commit never write the same file at once and neither
+     * flattens or reloads a half-finished state of the other. The slot is
+     * shared by all files: commits and replacing uploads run one at a time.
+     *
+     * Blocks for at most @p timeout. Must not be called from a command
+     * handler or while holding SharedLayers().
+     *
+     * @return The slot, released when the last copy is destroyed, or null if
+     *         it did not become free in time.
+     */
+    std::shared_ptr<void> AcquireFileWriteSlot(std::chrono::milliseconds timeout);
 
     // ------------------------------------------------------------------
     // Websocket-side API
@@ -360,10 +380,12 @@ public:
      * another, has been notified. Commits run one at a time from submission
      * until their reload is done, so each flattens the baseline the previous
      * one reloaded. Blocks the calling thread for at most kCommitTimeout for
-     * the commit slot and again for the result, and returns
-     * CommitStatus::Unavailable if either takes longer or the commit could
-     * not be queued. Safe to call from the REST thread; must not be called
-     * from a command handler.
+     * the commit slot and again for the result. Returns
+     * CommitStatus::Unavailable if nothing was queued (slot not free in
+     * time, queue full, session closing), and CommitStatus::Pending if the
+     * commit was queued but has not finished in time: it still runs, only
+     * its outcome is not reported. Safe to call from the REST thread; must
+     * not be called from a command handler.
      */
     CommitStatus SubmitCommitSessionCommand(const std::string& session_id, std::string& out_error);
 
@@ -467,7 +489,9 @@ private:
     /// accepted command, then revoke the listener and clear the stage's
     /// session layer before the last reference is dropped. Clearing avoids
     /// racing the thumbnail worker's SdfLayer::FindOrOpen on the same on-disk
-    /// path. Must be called without m_mutex_ held and never from a worker.
+    /// path. An auto-commit queues a reload of the written file on the layer
+    /// thread, holding the commit slot until it is done. Must be called
+    /// without m_mutex_ held and never from a worker.
     void TeardownSession(const std::shared_ptr<Session>& session);
 
     /// Background reaper loop: periodically calls ReapIdleSessions() until the

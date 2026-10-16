@@ -41,9 +41,15 @@ enum class CommitStatus
     UnknownSession,
     NothingToCommit,
     WriteFailed,
-    // The commit could not be scheduled or did not complete in time (queue
-    // full, session closing, or timeout). Retrying later may succeed.
+    // The commit was not queued (queue full, session closing, or another
+    // commit or upload still writing). Nothing was written; retrying later
+    // may succeed.
     Unavailable,
+    // The commit is queued and still runs, but did not finish while the
+    // caller waited (for example because its reload waits for a thumbnail
+    // render). Its outcome is not reported to the caller; retrying is not
+    // needed.
+    Pending,
 };
 
 struct CommitResult
