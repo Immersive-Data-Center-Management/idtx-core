@@ -19,21 +19,29 @@
  * outbound frames (acks, broadcasts, snapshots, corrections), happen on
  * that consumer.
  *
- * Known limitation: sessions opened on the same USD file share the root
- * SdfLayer through the USD layer registry. Reloading or committing that layer
- * from one session's consumer also delivers change notices to the other
- * sessions' stages on that thread. Operations that mutate the shared layer
- * are serialized across sessions, but a concurrent read on another session's
- * consumer is not.
+ * Shared layers: the USD layer registry hands every stage that uses a file
+ * the same SdfLayer, whether the file is the stage's root or reached through
+ * a sublayer, reference or payload. Reloading such a layer recomposes every
+ * stage using it, and runs their listeners, on the reloading thread. Reloads
+ * therefore run on a dedicated layer thread, never on a worker. It holds
+ * idtx::concurrency::SharedLayers() exclusively and pauses exactly the
+ * sessions whose Session::used_layers contain the layer, so their consumers
+ * are not running while it recomposes their stages; every other session keeps
+ * running. No worker ever blocks on this: a paused session simply is not
+ * drained, and a command that needs SharedLayers() while a reload is pending
+ * defers itself instead of waiting.
  */
 #pragma once
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <semaphore>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -125,8 +133,7 @@ public:
      *        @p usd_file exactly (as the uploads-relative string used
      *        when the session was created).
      *
-     * Walks @c m_sessions_ under a shared lock; session counts are small
-     * and this is only called on upload replacement and commit.
+     * Walks @c m_sessions_ under a shared lock; session counts are small.
      *
      * @param usd_file  Uploads-relative path to look up.
      * @return All matching sessions, or an empty vector when none exist.
@@ -134,33 +141,23 @@ public:
     std::vector<std::shared_ptr<Session>> FindByUsdFile(const std::string& usd_file) const;
 
     /**
-     * @brief Ask every live session whose @c usd_file matches @p usd_file to
-     *        reload its root layer, in response to an on-disk replacement of
-     *        the backing file.
+     * @brief Reload the in-memory layer of @p usd_file after the file was
+     *        replaced on disk.
      *
-     * Submits one reload command per session and returns immediately. Each
-     * command runs on the session's consumer, in order with the session's
-     * other commands:
-     *   1. sets @c Session::reload_in_progress so @c StageNoticeListener can
-     *      distinguish the reload notice from a normal authoring notice,
-     *   2. issues @c SdfLayer::Reload(force=true) on the stage's root
-     *      layer inside a @c SdfChangeBlock so a single notice is fired,
-     *   3. relies on the listener to broadcast the surviving changes to
-     *      attached clients. The listener drops broadcasts for any
-     *      attribute whose session-layer opinion still wins by
-     *      composition strength.
+     * Queues the reload on the layer thread and returns immediately. If no
+     * stage has the file loaded by then there is nothing to do. Otherwise the
+     * layer is reloaded once, inside a single change block, and every stage
+     * that uses it is notified: sessions on the file itself and sessions on
+     * files that sublayer, reference or payload it. Each session's listener
+     * takes its reload branch and drops the broadcast for any prim whose
+     * session-layer opinion still wins by composition strength.
      *
-     * Safe to call from any thread, including a command handler. Failures
-     * inside a single session are logged but do not affect other sessions.
+     * Never blocks. Safe to call from any thread.
      *
-     * @param usd_file  Uploads-relative path of the file that was just
-     *                  replaced on disk.
-     * @param skip      Session that is left out, because it has already
-     *                  reloaded (the committing session). May be null.
-     * @return Number of sessions that accepted the reload command.
+     * @param usd_file  Uploads-relative path of the file that was replaced.
+     * @return true if the reload was queued.
      */
-    std::size_t SubmitReloadSessionsCommand(const std::string& usd_file,
-                                            const Session* skip = nullptr);
+    bool ReloadSharedLayer(const std::string& usd_file);
 
     // ------------------------------------------------------------------
     // Websocket-side API
@@ -303,8 +300,24 @@ public:
                                             ConnectionId origin,
                                             std::uint64_t request_id) const;
 
+    /**
+     * @brief Queue adding (or, with @p remove, removing) a payload arc on
+     *        @p prim_path. Placeholder: the locking, deferral and layer
+     *        bookkeeping are in place, the authoring is not implemented yet
+     *        and the request is acked as "not_implemented".
+     *
+     * Never blocks. Not yet reachable from the websocket protocol.
+     */
+    SubmitStatus SubmitPayloadCommand(const std::string& session_id,
+                                      std::string prim_path,
+                                      std::string asset_path,
+                                      bool remove,
+                                      ConnectionId origin,
+                                      std::uint64_t request_id) const;
+
     // ------------------------------------------------------------------
-    // Broadcast (invoked from StageNoticeListener on the consumer)
+    // Broadcast (invoked from StageNoticeListener, on the session's consumer
+    // or on the layer thread while the session is paused)
     // ------------------------------------------------------------------
 
     /**
@@ -336,17 +349,20 @@ public:
     /**
      * @brief Merge the session's sidecar overrides back into the original USD
      *        file (preserving composition arcs via UsdUtilsFlattenLayerStack),
-     *        then ask every live session bound to the same file to reload.
+     *        then reload the file's layer, which every stage using it sees.
      *        Does not destroy the session.
      *
      * The commit is queued behind every command the session has already
-     * accepted, so it contains all previously acknowledged updates. Before
-     * it returns, the session's root layer has been reloaded from the
-     * written file; the other sessions on the file reload asynchronously,
-     * in order with their own commands. Blocks
-     * the calling thread for at most kCommitTimeout and returns
-     * CommitStatus::Unavailable if the commit could not be queued or did not
-     * finish in time. Safe to call from the REST thread; must not be called
+     * accepted, so it contains all previously acknowledged updates. The
+     * session's consumer writes the file; the layer thread then reloads the
+     * file's layer, pausing only the sessions that use it. Before this
+     * returns success, every session using the layer, on this file or
+     * another, has been notified. Commits run one at a time from submission
+     * until their reload is done, so each flattens the baseline the previous
+     * one reloaded. Blocks the calling thread for at most kCommitTimeout for
+     * the commit slot and again for the result, and returns
+     * CommitStatus::Unavailable if either takes longer or the commit could
+     * not be queued. Safe to call from the REST thread; must not be called
      * from a command handler.
      */
     CommitStatus SubmitCommitSessionCommand(const std::string& session_id, std::string& out_error);
@@ -392,23 +408,39 @@ private:
     void HandleCommand(Session& session, JoinCommand& command);
     void HandleCommand(Session& session, CreatePrimCommand& command);
     void HandleCommand(Session& session, SetPrimActiveCommand& command);
+    void HandleCommand(Session& session, PayloadCommand& command);
     void HandleCommand(Session& session, CommitCommand& command);
-    void HandleCommand(Session& session, ReloadCommand& command);
     void HandleCommand(Session& session, FlushCommand& command);
     void HandleCommand(Session& session, CorrectionCommand& command);
 
     /// Save the sidecar and fold the session's overrides into the original
-    /// file. If @p reload_root is true, the session's root layer is then
-    /// reloaded from the written file under the same lock, so the in-memory
-    /// baseline matches the file before the caller continues. Requires
-    /// exclusive access to the session's stage (the consumer, or a teardown
-    /// after the consumer went idle).
-    CommitResult CommitOverrides(Session& session, bool reload_root);
+    /// file. Does not reload. Requires exclusive access to the session's
+    /// stage (the consumer, or a teardown after the consumer went idle) and
+    /// the commit slot.
+    CommitResult CommitOverrides(Session& session);
 
-    /// Reload the session's root layer from disk and let the listener
-    /// broadcast the visible changes. The caller must hold
-    /// m_shared_layer_mutex_ and have exclusive access to the stage.
-    void ReloadRootLayer(Session& session);
+    /// Layer thread: reload @p layer with SharedLayers() held exclusively,
+    /// pausing every session that uses it for the duration. @p label names
+    /// the file in log messages. Returns true if the layer changed.
+    bool ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer, const std::string& label);
+
+    /// Every session, live or being torn down, whose used_layers contain
+    /// @p layer. The caller holds SharedLayers() exclusively.
+    std::vector<std::shared_ptr<Session>> SessionsUsingLayer(const pxr::SdfLayerHandle& layer) const;
+
+    /// Recompute @p session's used_layers from its stage. The caller holds
+    /// SharedLayers() and the session's consumer is not running elsewhere.
+    static void RefreshUsedLayers(Session& session);
+
+    /// Ownership of the already acquired m_commit_slot_: releases it when the
+    /// last copy is destroyed, on whichever thread that happens.
+    std::shared_ptr<void> CommitSlotToken();
+
+    /// Queue @p job on the layer thread. Returns false once it has stopped.
+    bool PostLayerJob(std::function<void()> job);
+
+    /// Layer thread loop: runs queued jobs in order until stopped and empty.
+    void LayerThreadRun();
 
     /// Send @p payload to one connection of @p session, if still attached.
     /// Returns true if it was sent.
@@ -446,15 +478,29 @@ private:
     // references. Stopped in the destructor after every session is idle.
     std::shared_ptr<idtx::concurrency::WorkerExecutor>         m_executor_;
 
-    // Serializes commands that mutate a root layer which may be shared with
-    // other sessions on the same file (reload and commit). Not recursive:
-    // ReloadRootLayer() expects the caller to hold it.
-    std::mutex                                                 m_shared_layer_mutex_;
+    // Held by one commit at a time, from SubmitCommitSessionCommand() until
+    // the reload of the written file has finished, and by a teardown's
+    // auto-commit. A semaphore rather than a mutex because the commit's
+    // phases run on three threads.
+    std::binary_semaphore                                      m_commit_slot_{1};
 
     idtx::utils::UsdFileLocator                                m_locator_;
     std::filesystem::path                                      m_sessions_dir_;
     mutable std::shared_mutex                                  m_mutex_;
     std::unordered_map<std::string, std::shared_ptr<Session>>  m_sessions_;
+
+    // Sessions removed from m_sessions_ whose teardown has not finished.
+    // Their stages still use layers and their consumers may still run, so a
+    // reload must find and pause them too. Guarded by m_mutex_.
+    std::vector<std::shared_ptr<Session>>                      m_closing_;
+
+    // Layer thread: runs every reload, so that no executor worker ever holds
+    // SharedLayers() exclusively or waits for a session to pause.
+    std::mutex                                                 m_layer_mutex_;
+    std::condition_variable                                    m_layer_cv_;
+    std::deque<std::function<void()>>                          m_layer_jobs_;
+    bool                                                       m_layer_stop_ = false;
+    std::thread                                                m_layer_thread_;
 
     // Idle-session reaper. m_idle_timeout_ == 0 disables it and leaves the
     // thread unstarted. m_reaper_mutex_/m_reaper_cv_ drive the sleep/wake of

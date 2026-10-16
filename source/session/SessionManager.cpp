@@ -29,7 +29,9 @@
 #include <idtx/proto/transform.pb.h>
 #include <idtx/proto/prim.pb.h>
 
+#include "concurrency/SharedLayerLock.h"
 #include "concurrency/WorkerExecutor.h"
+#include "AuthoringContext.h"
 #include "PrimDispatcher.h"
 #include "StageCommitter.h"
 #include "StageNoticeListener.h"
@@ -259,6 +261,8 @@ SessionManager::SessionManager(idtx::utils::UsdFileLocator file_locator,
     IDTX_LOG(IDTX_INFO, "Session command executor started with {} worker(s).",
              m_executor_->WorkerCount());
 
+    m_layer_thread_ = std::thread(&SessionManager::LayerThreadRun, this);
+
     if (m_idle_timeout_ > std::chrono::seconds{0})
     {
         m_reaper_thread_ = std::thread(&SessionManager::ReaperRun, this);
@@ -281,11 +285,18 @@ SessionManager::~SessionManager()
 
     // Take the sessions out of the map first and tear them down without
     // m_mutex_ held: a command that is still draining may call back into the
-    // manager (for example a commit that schedules reloads).
-    std::unordered_map<std::string, std::shared_ptr<Session>> sessions;
+    // manager (for example a commit that queues its reload). Until their
+    // teardown finishes they stay in m_closing_, where a reload finds them.
+    std::vector<std::shared_ptr<Session>> sessions;
     {
         std::unique_lock lk(m_mutex_);
-        sessions.swap(m_sessions_);
+        for (auto& [id, session] : m_sessions_)
+        {
+            (void)id;
+            sessions.push_back(session);
+            m_closing_.push_back(session);
+        }
+        m_sessions_.clear();
     }
 
     // Deterministic teardown, per session:
@@ -300,12 +311,20 @@ SessionManager::~SessionManager()
     //      caller, which then crashes when the last strong reference drops.
     //   4. Only then drop the shared_ptrs, releasing the UsdStage handles
     //      and, transitively, the SdfLayers.
-    for (auto& [id, session] : sessions)
+    for (auto& session : sessions)
     {
-        (void)id;
         TeardownSession(session);
     }
     sessions.clear();
+
+    // Reloads queued by commits that finished during the teardown still run;
+    // the thread exits once its queue is empty.
+    {
+        std::lock_guard lk(m_layer_mutex_);
+        m_layer_stop_ = true;
+    }
+    m_layer_cv_.notify_all();
+    if (m_layer_thread_.joinable()) m_layer_thread_.join();
 
     // Every session is idle, so no drain task can be pending. Joining here
     // guarantees no worker thread outlives the manager.
@@ -321,21 +340,32 @@ void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
         session->commands->CloseAdmission();
         session->commands->WaitIdle();
     }
-    // From here on this thread has exclusive access to the stage.
+    // From here on no command of this session runs, so this thread has the
+    // stage to itself, apart from a reload that pauses the session (which
+    // still finds it in m_closing_) - held off by the shared lock below.
 
     if (session->listener) session->listener->Revoke();
+
+    // Order: commit slot, then SharedLayers(), as everywhere else.
+    std::shared_ptr<void> commit_slot;
+    if (session->auto_commit)
+    {
+        m_commit_slot_.acquire();
+        commit_slot = CommitSlotToken();
+    }
+    std::shared_lock layers(idtx::concurrency::SharedLayers());
 
     const pxr::SdfLayerHandle session_layer =
         session->stage ? session->stage->GetSessionLayer() : pxr::SdfLayerHandle();
     const bool has_overrides = session_layer && !session_layer->IsEmpty();
 
     // Auto-commit on destroy folds the sidecar overrides back into the original
-    // file (preserving composition arcs). We deliberately do NOT trigger a
-    // SubmitReloadSessionsCommand() here: the session is being dropped anyway.
+    // file (preserving composition arcs). We deliberately do NOT reload the
+    // file's layer here: the session is being dropped anyway.
     bool committed = false;
     if (session->auto_commit && session->stage && has_overrides)
     {
-        const CommitResult result = CommitOverrides(*session, /*reload_root=*/false);
+        const CommitResult result = CommitOverrides(*session);
         committed = result.status == CommitStatus::Ok;
         if (!committed)
             IDTX_LOG(IDTX_ERROR,
@@ -381,6 +411,13 @@ void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
         }
     }
 
+    // Release the stage while no reload can run, so it is never recomposed
+    // by one while it is being destroyed.
+    session->used_layers.clear();
+    session->stage = pxr::UsdStageRefPtr();
+    layers.unlock();
+    commit_slot.reset();
+
     // Remove the on-disk sidecar so per-session files do not accumulate after
     // reaping. Best-effort; a failure is logged but not fatal.
     if (!session->sidecar_path.empty())
@@ -394,6 +431,9 @@ void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
                          session->sidecar_path.string(), ec.message());
         }
     }
+
+    std::unique_lock lk(m_mutex_);
+    std::erase(m_closing_, session);
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +461,12 @@ std::shared_ptr<Session> SessionManager::Create(const std::string& usd_file,
     const std::string session_id  = idtx::utils::GenerateUuidV4();
     const std::filesystem::path sidecar_path =
         m_sessions_dir_ / (session_id + ".usda");
+
+    // The root layer, and every layer the stage composes, may already be in
+    // use by other stages. Held until the session is registered, so a reload
+    // either finds it with its used layers or happens entirely before it
+    // opened anything. Declared first so it outlives the local handles.
+    std::shared_lock layers(idtx::concurrency::SharedLayers());
 
     // Open the root layer and a named sidecar layer, then open the stage with
     // the sidecar as its session layer. The sidecar IS the composition's
@@ -464,7 +510,7 @@ std::shared_ptr<Session> SessionManager::Create(const std::string& usd_file,
     // to the session layer (the named sidecar) so client edits compose *above*
     // the root layer. This gives us:
     //   1. `SdfLayer::Reload(force=true)` on the root layer (used by
-    //      SubmitReloadSessionsCommand when a client uploads a replacement file)
+    //      ReloadSharedLayer when a client uploads a replacement file)
     //      does not clobber live session-authored overrides.
     //   2. StageNoticeListener can decide whether the on-disk change is
     //      visible to the client by inspecting the session layer directly.
@@ -493,6 +539,7 @@ std::shared_ptr<Session> SessionManager::Create(const std::string& usd_file,
 
     session->listener = std::make_shared<StageNoticeListener>(this, std::weak_ptr<Session>(session));
     session->listener->Register();
+    RefreshUsedLayers(*session);
 
     {
         std::unique_lock lk(m_mutex_);
@@ -536,6 +583,7 @@ bool SessionManager::Destroy(const std::string& id)
         if (it == m_sessions_.end()) return false;
         victim = it->second;
         m_sessions_.erase(it);
+        m_closing_.push_back(victim);
     }
 
     // Teardown (drain, final commit/flush, warnings, sidecar removal,
@@ -560,36 +608,157 @@ SessionManager::FindByUsdFile(const std::string& usd_file) const
     return matches;
 }
 
-std::size_t SessionManager::SubmitReloadSessionsCommand(const std::string& usd_file,
-                                                        const Session* skip)
+bool SessionManager::ReloadSharedLayer(const std::string& usd_file)
 {
-    const auto sessions = FindByUsdFile(usd_file);
-    if (sessions.empty())
+    std::filesystem::path resolved;
+    if (m_locator_.Resolve(usd_file, resolved) != idtx::utils::UsdFileLocator::Status::Ok)
     {
-        IDTX_LOG(IDTX_DEBUG,
-                 "SubmitReloadSessionsCommand('{}'): no live sessions to reload.",
-                 usd_file);
-        return 0;
+        IDTX_LOG(IDTX_WARN, "ReloadSharedLayer: cannot resolve '{}'.", usd_file);
+        return false;
     }
 
-    std::size_t accepted = 0;
-    for (const auto& session : sessions)
+    return PostLayerJob([this, usd_file, path = resolved.string()]
     {
-        if (!session || session.get() == skip) continue;
-        const auto status = Submit(*session, ReloadCommand{});
-        if (status == SubmitStatus::Accepted)
+        // Resolved exactly as Create() opens it, so this finds the same
+        // layer. The registry lookup is thread-safe, and all reloads run on
+        // this thread, so none is in progress.
+        const pxr::SdfLayerRefPtr layer = pxr::SdfLayer::Find(path);
+        if (!layer)
         {
-            ++accepted;
+            IDTX_LOG(IDTX_DEBUG, "ReloadSharedLayer('{}'): no stage has it loaded.", usd_file);
+            return;
         }
-        else
+        ReloadLayerPausingUsers(layer, usd_file);
+    });
+}
+
+std::shared_ptr<void> SessionManager::CommitSlotToken()
+{
+    return std::shared_ptr<void>(nullptr, [this](void*) { m_commit_slot_.release(); });
+}
+
+bool SessionManager::PostLayerJob(std::function<void()> job)
+{
+    {
+        std::lock_guard lk(m_layer_mutex_);
+        if (m_layer_stop_) return false;
+        m_layer_jobs_.push_back(std::move(job));
+    }
+    m_layer_cv_.notify_one();
+    return true;
+}
+
+void SessionManager::LayerThreadRun()
+{
+    for (;;)
+    {
+        std::function<void()> job;
         {
-            IDTX_LOG(IDTX_WARN,
-                     "SubmitReloadSessionsCommand: session {} did not accept the reload ({}).",
-                     session->id,
-                     status == SubmitStatus::QueueFull ? "queue full" : "closing");
+            std::unique_lock lk(m_layer_mutex_);
+            m_layer_cv_.wait(lk, [this] { return m_layer_stop_ || !m_layer_jobs_.empty(); });
+            if (m_layer_jobs_.empty()) return; // stopped and drained
+            job = std::move(m_layer_jobs_.front());
+            m_layer_jobs_.pop_front();
+        }
+
+        try
+        {
+            job();
+        }
+        catch (const std::exception& e)
+        {
+            IDTX_LOG(IDTX_ERROR, "Layer job threw: {}", e.what());
+        }
+        catch (...)
+        {
+            IDTX_LOG(IDTX_ERROR, "Layer job threw an unknown exception.");
         }
     }
-    return accepted;
+}
+
+std::vector<std::shared_ptr<Session>>
+SessionManager::SessionsUsingLayer(const pxr::SdfLayerHandle& layer) const
+{
+    std::vector<std::shared_ptr<Session>> users;
+    const auto uses = [&layer](const std::shared_ptr<Session>& session)
+    {
+        return session
+            && std::find(session->used_layers.begin(), session->used_layers.end(), layer)
+                   != session->used_layers.end();
+    };
+
+    std::shared_lock lk(m_mutex_);
+    for (const auto& [id, session] : m_sessions_)
+    {
+        (void)id;
+        if (uses(session)) users.push_back(session);
+    }
+    for (const auto& session : m_closing_)
+    {
+        if (uses(session)) users.push_back(session);
+    }
+    return users;
+}
+
+void SessionManager::RefreshUsedLayers(Session& session)
+{
+    session.used_layers = session.stage ? session.stage->GetUsedLayers()
+                                        : pxr::SdfLayerHandleVector{};
+}
+
+bool SessionManager::ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer,
+                                             const std::string& label)
+{
+    if (!layer) return false;
+
+    // Exclusive: no stage is being created and no session is adding or
+    // dropping layers, so the used-layer lists read below are complete.
+    std::unique_lock layers(idtx::concurrency::SharedLayers());
+
+    // Only these sessions' stages compose the layer and are recomposed by
+    // the reload; every other session keeps running. Pause() returns once
+    // their running command, if any, has finished. No command waits on
+    // anything, so that is bounded by one command.
+    const std::vector<std::shared_ptr<Session>> users = SessionsUsingLayer(layer);
+    std::vector<const Session*> paused;
+    paused.reserve(users.size());
+    for (const auto& session : users)
+    {
+        if (session->commands) session->commands->Pause();
+        paused.push_back(session.get());
+    }
+
+    bool ok = false;
+    try
+    {
+        // Every stage using the layer recomposes and runs its listener on
+        // this thread when the change block closes, inside this scope.
+        AuthoringContext context;
+        context.reload = true;
+        context.paused = &paused;
+        const AuthoringScope authoring(context);
+        pxr::SdfChangeBlock block;
+        ok = layer->Reload(/*force=*/true);
+    }
+    catch (const std::exception& e)
+    {
+        IDTX_LOG(IDTX_ERROR, "SdfLayer::Reload threw for '{}': {}", label, e.what());
+    }
+
+    // The reload may have added or removed sublayers, references or payloads.
+    for (const auto& session : users) RefreshUsedLayers(*session);
+
+    layers.unlock();
+    for (const auto& session : users)
+    {
+        if (session->commands) session->commands->Resume();
+    }
+
+    if (ok)
+        IDTX_LOG(IDTX_INFO, "Reloaded layer '{}' ({} session(s) paused).", label, users.size());
+    else
+        IDTX_LOG(IDTX_DEBUG, "SdfLayer::Reload reported no change for '{}'.", label);
+    return ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -770,6 +939,37 @@ SessionManager::SubmitStatus SessionManager::SubmitSetPrimActiveCommand(
     return status;
 }
 
+SessionManager::SubmitStatus SessionManager::SubmitPayloadCommand(
+    const std::string& session_id,
+    std::string prim_path,
+    std::string asset_path,
+    bool remove,
+    ConnectionId origin,
+    std::uint64_t request_id) const
+{
+    auto session = Get(session_id);
+    if (!session)
+    {
+        IDTX_LOG(IDTX_WARN, "SubmitPayloadCommand: unknown session {}.", session_id);
+        return SubmitStatus::UnknownSession;
+    }
+
+    PayloadCommand command;
+    command.prim_path  = std::move(prim_path);
+    command.asset_path = std::move(asset_path);
+    command.remove     = remove;
+    command.origin     = origin;
+    command.request_id = request_id;
+
+    const auto status = Submit(*session, std::move(command));
+    if (status == SubmitStatus::QueueFull)
+    {
+        IDTX_LOG(IDTX_WARN, "Session {} command queue is full; rejecting payload change.",
+                 session_id);
+    }
+    return status;
+}
+
 // ---------------------------------------------------------------------------
 // Command processing (runs on the session's consumer)
 // ---------------------------------------------------------------------------
@@ -778,6 +978,40 @@ void SessionManager::ProcessCommand(Session& session, SessionCommand&& command)
 {
     try
     {
+        // A payload change, and an active-state change (which prunes or
+        // restores a subtree together with whatever it references), starts or
+        // stops using layers, so it must not overlap a reload, which decides
+        // from used_layers which sessions to pause. A worker never waits for
+        // that: while a reload runs or waits, the command is handed back and
+        // the session stays paused until the reload has released the lock.
+        // Every other command only works on layers its stage already uses,
+        // and a reload of one of those pauses this session instead.
+        std::shared_lock<idtx::concurrency::SharedLayerLock> layers;
+        // Only the commands checked here will make the schedular try to take the lock.
+        if (std::holds_alternative<PayloadCommand>(command)
+            || std::holds_alternative<SetPrimActiveCommand>(command))
+        {
+            const std::weak_ptr<SessionCommandScheduler> scheduler = session.commands;
+            if (!idtx::concurrency::SharedLayers().try_lock_shared_or_notify(
+                    [scheduler]
+                    {
+                        if (auto resumed = scheduler.lock()) resumed->Resume();
+                    }))
+            {
+                // Commands for which the schedular needs the lock but cannot have it yet are deferred.
+                session.commands->DeferCurrent(std::move(command));
+                return;
+            }
+            // Return the lock in its locked state (std::adopt_lock) to layers,
+            // so it is not locked again later by a consumer/worker on a different thread.
+            // std::shared_lock RAII ensures the lock is released at the end of this try block,
+            // when layers is destroyed, i.e. after the command has been handled.
+            // Fwiw: If the handler below throws, the same destructor runs during stack unwinding,
+            // before control reaches the catch block.
+            layers = std::shared_lock(idtx::concurrency::SharedLayers(), std::adopt_lock);
+        }
+
+        const AuthoringScope authoring({&session});
         std::visit([this, &session](auto& cmd) { HandleCommand(session, cmd); }, command);
     }
     catch (const std::exception& e)
@@ -815,16 +1049,16 @@ void SessionManager::HandleCommand(Session& session, TransformCommand& command)
     }
 
     bool ok = false;
-    session.current_origin.store(command.origin, std::memory_order_relaxed);
     try
     {
+        // Lets the listener suppress the echo back to the origin.
+        const AuthoringScope authoring({&session, command.origin});
         ok = TransformDispatcher::Apply(session.stage, *command.update);
     }
     catch (const std::exception& e)
     {
         IDTX_LOG(IDTX_ERROR, "TransformUpdate threw in session {}: {}", session.id, e.what());
     }
-    session.current_origin.store(0, std::memory_order_relaxed);
 
     // Mark the session dirty so the SessionFlusher persists the session layer
     // to its sidecar on its next tick.
@@ -847,23 +1081,24 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
         return;
     }
 
-    // Author the prim. current_origin is set for consistency with the transform
-    // path; create_in_progress makes the TfNotice listener skip the resync this
+    // Author the prim. The origin is set for consistency with the transform
+    // path; `creating` makes the TfNotice listener skip the resync this
     // authoring fires, because the creation is broadcast explicitly below.
     CreatedPrim created;
-    session.current_origin.store(command.origin, std::memory_order_relaxed);
-    session.create_in_progress.store(true, std::memory_order_relaxed);
     bool ok = false;
     try
     {
+        AuthoringContext context;
+        context.session  = &session;
+        context.origin   = command.origin;
+        context.creating = true;
+        const AuthoringScope authoring(context);
         ok = PrimDispatcher::Create(session.stage, command.parent_path, command.type, created);
     }
     catch (const std::exception& e)
     {
         IDTX_LOG(IDTX_ERROR, "CreatePrim threw in session {}: {}", session.id, e.what());
     }
-    session.create_in_progress.store(false, std::memory_order_relaxed);
-    session.current_origin.store(0, std::memory_order_relaxed);
 
     if (!ok)
     {
@@ -900,24 +1135,32 @@ void SessionManager::HandleCommand(Session& session, SetPrimActiveCommand& comma
         return;
     }
 
-    // Author the active flag. current_origin is set for consistency with the
-    // other authoring paths; set_active_in_progress makes the TfNotice listener
+    // Author the active flag. The origin is set for consistency with the
+    // other authoring paths; `setting_active` makes the TfNotice listener
     // skip the resync this fires, because the change is announced explicitly
     // with a SetPrimActiveBroadcast below (an inactive prim is still readable,
-    // so without the flag the generic path would broadcast a stale transform).
-    session.current_origin.store(command.origin, std::memory_order_relaxed);
-    session.set_active_in_progress.store(true, std::memory_order_relaxed);
+    // so without it the generic path would broadcast a stale transform).
     PrimDispatcher::SetActiveStatus status = PrimDispatcher::SetActiveStatus::Failed;
     try
     {
+        AuthoringContext context;
+        context.session        = &session;
+        context.origin         = command.origin;
+        context.setting_active = true;
+        const AuthoringScope authoring(context);
         status = PrimDispatcher::SetActive(session.stage, command.prim_path, command.active);
     }
     catch (const std::exception& e)
     {
         IDTX_LOG(IDTX_ERROR, "SetPrimActive threw in session {}: {}", session.id, e.what());
     }
-    session.set_active_in_progress.store(false, std::memory_order_relaxed);
-    session.current_origin.store(0, std::memory_order_relaxed);
+
+    // Deactivating prunes the prim's subtree, with every layer it references
+    // or payloads, from the composed stage; reactivating composes them again,
+    // opening them through the shared registry. A reload has to find this
+    // session for each layer it now uses; still under SharedLayers() (see
+    // ProcessCommand()), so no reload reads the list meanwhile.
+    RefreshUsedLayers(session);
 
     switch (status)
     {
@@ -954,6 +1197,44 @@ void SessionManager::HandleCommand(Session& session, SetPrimActiveCommand& comma
 
     IDTX_LOG(IDTX_INFO, "Session {}: set active={} on '{}'.",
              session.id, command.active, command.prim_path);
+}
+
+void SessionManager::HandleCommand(Session& session, PayloadCommand& command)
+{
+    // Runs with SharedLayers() held shared (see ProcessCommand()).
+    if (!session.stage)
+    {
+        SendAck(session, command.origin, command.request_id, false, "apply_failed");
+        return;
+    }
+
+    bool ok = false;
+    {
+        const AuthoringScope authoring({&session, command.origin});
+
+        // TODO(payload prims): author the arc into the session layer, for
+        // example AddPayload() / ClearPayloads() on the prim's UsdPayloads.
+        // For the implementation:
+        //  - Asset paths authored into the session layer are anchored to the
+        //    sidecar in the sessions directory, not to the root file. Resolve
+        //    the client's path against the root file and author it absolute
+        //    or relative to the sidecar.
+        //  - Loading the payload parses its file on this worker. Open it off
+        //    the worker pool first (for example keep a UsdStage on it alive
+        //    in the command), so only the recompose runs here.
+        //  - What the listener broadcasts for the resulting resync, and the
+        //    message clients receive, is not defined yet.
+        IDTX_LOG(IDTX_WARN, "Session {}: {} payload on '{}' is not implemented yet.",
+                 session.id, command.remove ? "removing a" : "adding a", command.prim_path);
+    }
+
+    // Whatever was authored, the stage may now compose different layers. A
+    // reload has to find this session for each of them; still under
+    // SharedLayers(), so no reload reads the list meanwhile.
+    RefreshUsedLayers(session);
+
+    if (ok) session.dirty.store(true, std::memory_order_relaxed);
+    SendAck(session, command.origin, command.request_id, ok, "not_implemented");
 }
 
 void SessionManager::HandleCommand(Session& session, JoinCommand& command)
@@ -1076,67 +1357,36 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
 
 void SessionManager::HandleCommand(Session& session, CommitCommand& command)
 {
-    // The root layer is reloaded before the result is reported, so once the
-    // caller sees success the in-memory baseline matches the file and a
-    // session created afterwards starts from the committed content.
-    CommitResult result = CommitOverrides(session, /*reload_root=*/true);
-    if (result.status == CommitStatus::Ok)
+    // The file is written here, in order with the session's commands. Its
+    // layer is reloaded on the layer thread, because the reload pauses every
+    // session using the layer, this one included, which a worker must never
+    // wait for. The result is reported once the reload is done, so a caller
+    // that sees success, and a session created afterwards, see the committed
+    // content. The commit slot stays taken until then.
+    CommitResult result = CommitOverrides(session);
+    if (result.status != CommitStatus::Ok)
     {
-        IDTX_LOG(IDTX_INFO, "Committed session {} to '{}'.", session.id, session.usd_file);
-
-        // Let every other live session bound to the same file observe the
-        // new baseline (mirrors the upload-replacement reload path). Only
-        // queues commands, so this is safe from the consumer.
-        SubmitReloadSessionsCommand(session.usd_file, &session);
-    }
-    command.result.set_value(std::move(result));
-}
-
-void SessionManager::HandleCommand(Session& session, ReloadCommand& /*command*/)
-{
-    std::lock_guard shared_layer_lock(m_shared_layer_mutex_);
-    ReloadRootLayer(session);
-}
-
-void SessionManager::ReloadRootLayer(Session& session)
-{
-    if (!session.stage) return;
-
-    const pxr::SdfLayerHandle root_layer = session.stage->GetRootLayer();
-    if (!root_layer)
-    {
-        IDTX_LOG(IDTX_WARN, "Reload: session {} has no root layer; skipping.", session.id);
+        command.result.set_value(std::move(result));
         return;
     }
+    IDTX_LOG(IDTX_INFO, "Committed session {} to '{}'.", session.id, session.usd_file);
 
-    // Signal to StageNoticeListener that the imminent
-    // UsdNotice::ObjectsChanged is a reload, not a client-authored change,
-    // so the listener can consult the session layer to decide whether the
-    // reload is visible to attached clients. The notice fires synchronously
-    // when the change block closes, so the flag can be cleared right after.
-    session.reload_in_progress.store(true, std::memory_order_relaxed);
-    session.current_origin.store(0, std::memory_order_relaxed);
+    const pxr::SdfLayerRefPtr root_layer = session.stage->GetRootLayer();
+    auto pending  = std::make_shared<CommitCommand>(std::move(command));
+    auto reported = std::make_shared<CommitResult>(std::move(result));
 
-    bool ok = false;
-    try
+    const bool posted = PostLayerJob([this, root_layer, label = session.usd_file, pending, reported]
     {
-        pxr::SdfChangeBlock block;
-        ok = root_layer->Reload(/*force=*/true);
-    }
-    catch (const std::exception& e)
+        ReloadLayerPausingUsers(root_layer, label);
+        pending->result.set_value(std::move(*reported));
+    });
+    if (!posted)
     {
-        IDTX_LOG(IDTX_ERROR,
-                 "SdfLayer::Reload threw for session {} ('{}'): {}",
-                 session.id, session.usd_file, e.what());
+        IDTX_LOG(IDTX_WARN,
+                 "Commit of session {}: shutting down, '{}' was written but not reloaded.",
+                 session.id, session.usd_file);
+        pending->result.set_value(std::move(*reported));
     }
-    session.reload_in_progress.store(false, std::memory_order_relaxed);
-
-    if (ok)
-        IDTX_LOG(IDTX_INFO, "Reloaded root layer for session {} ('{}').",
-                 session.id, session.usd_file);
-    else
-        IDTX_LOG(IDTX_DEBUG, "SdfLayer::Reload reported no change for session {} ('{}').",
-                 session.id, session.usd_file);
 }
 
 void SessionManager::HandleCommand(Session& session, FlushCommand& /*command*/)
@@ -1173,7 +1423,7 @@ void SessionManager::HandleCommand(Session& session, CorrectionCommand& command)
     SendCorrection(session, command.connection, command.request->prim_path);
 }
 
-CommitResult SessionManager::CommitOverrides(Session& session, const bool reload_root)
+CommitResult SessionManager::CommitOverrides(Session& session)
 {
     CommitResult result;
     if (!session.stage)
@@ -1191,8 +1441,6 @@ CommitResult SessionManager::CommitOverrides(Session& session, const bool reload
         return result;
     }
 
-    std::lock_guard shared_layer_lock(m_shared_layer_mutex_);
-
     // Best-effort persist of the sidecar so its on-disk state matches what
     // we are about to fold into the original file.
     session_layer->Save();
@@ -1204,10 +1452,6 @@ CommitResult SessionManager::CommitOverrides(Session& session, const bool reload
 
     session.dirty.store(false, std::memory_order_relaxed);
     result.status = CommitStatus::Ok;
-
-    // Under the same lock, so no other reload or commit can run between
-    // writing the file and reading it back.
-    if (reload_root) ReloadRootLayer(session);
     return result;
 }
 
@@ -1329,14 +1573,26 @@ void SessionManager::BroadcastToAll(Session& session,
 SessionManager::CommitStatus SessionManager::SubmitCommitSessionCommand(const std::string& session_id,
                                                                         std::string& out_error)
 {
+    // The stage is not checked here: a teardown may be releasing it. The
+    // command reports a session without a stage as unknown.
     auto session = Get(session_id);
-    if (!session || !session->stage)
+    if (!session)
     {
         out_error = "unknown session";
         return CommitStatus::UnknownSession;
     }
 
+    // One commit at a time, from here until the reload of its file is done,
+    // so the next one flattens the baseline this one reloaded. Taken on this
+    // (REST) thread, before anything is queued, so no worker ever waits for it.
+    if (!m_commit_slot_.try_acquire_for(kCommitTimeout))
+    {
+        out_error = "another commit is still in progress";
+        return CommitStatus::Unavailable;
+    }
+
     CommitCommand command;
+    command.commit_slot = CommitSlotToken();
     std::future<CommitResult> future = command.result.get_future();
 
     const auto status = Submit(*session, std::move(command));
@@ -1438,6 +1694,7 @@ std::size_t SessionManager::ReapIdleSessions()
                          it->first,
                          static_cast<long long>(m_idle_timeout_.count()));
                 reaped.push_back(session);
+                m_closing_.push_back(session);
                 it = m_sessions_.erase(it);
             }
             else
