@@ -122,6 +122,15 @@ crow::response SessionController::CommitSession(const std::string& session_id)
             res.set_header("Content-Type", "application/json");
             return res;
         }
+        case CommitStatus::Pending:
+        {
+            // Queued and still running; a retry is not needed.
+            crow::response res(202, json{{"committed", false},
+                                         {"pending", true},
+                                         {"session_id", session_id}}.dump());
+            res.set_header("Content-Type", "application/json");
+            return res;
+        }
         case CommitStatus::UnknownSession:
             return idtx::dto::make_error(404, "not_found", "Session not found.");
         case CommitStatus::NothingToCommit:

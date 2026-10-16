@@ -360,13 +360,17 @@ void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
     const bool has_overrides = session_layer && !session_layer->IsEmpty();
 
     // Auto-commit on destroy folds the sidecar overrides back into the original
-    // file (preserving composition arcs). We deliberately do NOT reload the
-    // file's layer here: the session is being dropped anyway.
+    // file (preserving composition arcs). The file's layer is then reloaded
+    // like after any commit, so the other sessions using it show the
+    // committed content and a later commit of theirs flattens it rather than
+    // overwriting it with the old baseline.
     bool committed = false;
+    pxr::SdfLayerRefPtr committed_root;
     if (session->auto_commit && session->stage && has_overrides)
     {
         const CommitResult result = CommitOverrides(*session);
         committed = result.status == CommitStatus::Ok;
+        if (committed) committed_root = session->stage->GetRootLayer();
         if (!committed)
             IDTX_LOG(IDTX_ERROR,
                      "Auto-commit failed for session {} -> '{}': {}",
@@ -416,6 +420,18 @@ void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
     session->used_layers.clear();
     session->stage = pxr::UsdStageRefPtr();
     layers.unlock();
+
+    // The reload runs on the layer thread, like a commit's. The job keeps the
+    // commit slot until it has finished, so the next commit or upload of the
+    // file starts from the reloaded baseline. During shutdown the layer
+    // thread still runs: it is stopped only after every teardown.
+    if (committed_root)
+    {
+        PostLayerJob([this, committed_root, label = session->usd_file, commit_slot]
+        {
+            ReloadLayerPausingUsers(committed_root, label);
+        });
+    }
     commit_slot.reset();
 
     // Remove the on-disk sidecar so per-session files do not accumulate after
@@ -608,7 +624,7 @@ SessionManager::FindByUsdFile(const std::string& usd_file) const
     return matches;
 }
 
-bool SessionManager::ReloadSharedLayer(const std::string& usd_file)
+bool SessionManager::ReloadSharedLayer(const std::string& usd_file, std::shared_ptr<void> hold)
 {
     std::filesystem::path resolved;
     if (m_locator_.Resolve(usd_file, resolved) != idtx::utils::UsdFileLocator::Status::Ok)
@@ -617,7 +633,9 @@ bool SessionManager::ReloadSharedLayer(const std::string& usd_file)
         return false;
     }
 
-    return PostLayerJob([this, usd_file, path = resolved.string()]
+    // `hold` lives in the job and is released when the job is destroyed,
+    // after the reload.
+    return PostLayerJob([this, usd_file, path = resolved.string(), hold = std::move(hold)]
     {
         // Resolved exactly as Create() opens it, so this finds the same
         // layer. The registry lookup is thread-safe, and all reloads run on
@@ -630,6 +648,12 @@ bool SessionManager::ReloadSharedLayer(const std::string& usd_file)
         }
         ReloadLayerPausingUsers(layer, usd_file);
     });
+}
+
+std::shared_ptr<void> SessionManager::AcquireFileWriteSlot(std::chrono::milliseconds timeout)
+{
+    if (!m_commit_slot_.try_acquire_for(timeout)) return nullptr;
+    return CommitSlotToken();
 }
 
 std::shared_ptr<void> SessionManager::CommitSlotToken()
@@ -702,8 +726,26 @@ SessionManager::SessionsUsingLayer(const pxr::SdfLayerHandle& layer) const
 
 void SessionManager::RefreshUsedLayers(Session& session)
 {
-    session.used_layers = session.stage ? session.stage->GetUsedLayers()
-                                        : pxr::SdfLayerHandleVector{};
+    // Value clips are deliberately not listed. Clip files only supply time
+    // samples, are opened lazily on the first time-sampled read, and are not
+    // subscribed to by the stage, so a reload of one neither recomposes the
+    // stage nor notifies its listener. Sessions currently read values only at
+    // UsdTimeCode::Default(), which never opens a clip file, so no consumer
+    // ever reads a clip file a reload could rewrite. The thumbnail renderer
+    // may read clips, but holds SharedLayers() for the whole render.
+    //
+    // Supporting time-sampled reads in sessions (playback, scrubbing) would
+    // need:
+    //  - includeClipLayers=true here, and a refresh after every command that
+    //    may resolve time-sampled values, since that is when clips open. Such
+    //    commands then change the used layers and, like payload and
+    //    active-state changes, must take SharedLayers() in ProcessCommand.
+    //  - Explicit change propagation after reloading a clip file: the stage
+    //    is not notified, so the listener sends nothing, and affected clients
+    //    must be told some other way (for example re-broadcast or refetch).
+    session.used_layers = session.stage
+        ? session.stage->GetUsedLayers(/*includeClipLayers=*/false)
+        : pxr::SdfLayerHandleVector{};
 }
 
 bool SessionManager::ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer,
@@ -1587,7 +1629,7 @@ SessionManager::CommitStatus SessionManager::SubmitCommitSessionCommand(const st
     // (REST) thread, before anything is queued, so no worker ever waits for it.
     if (!m_commit_slot_.try_acquire_for(kCommitTimeout))
     {
-        out_error = "another commit is still in progress";
+        out_error = "another commit or upload is still writing";
         return CommitStatus::Unavailable;
     }
 
@@ -1606,11 +1648,13 @@ SessionManager::CommitStatus SessionManager::SubmitCommitSessionCommand(const st
 
     if (future.wait_for(kCommitTimeout) != std::future_status::ready)
     {
-        // The commit stays queued and still runs; only the caller gives up.
-        out_error = "commit did not complete in time";
-        IDTX_LOG(IDTX_WARN, "Commit of session {} timed out after {}s.",
+        // The commit stays queued and still runs; only the caller stops
+        // waiting. Reporting a failure here would invite a retry of a commit
+        // that is going to happen anyway.
+        out_error = "commit is still in progress";
+        IDTX_LOG(IDTX_WARN, "Commit of session {} still running after {}s; reported as pending.",
                  session_id, static_cast<long long>(kCommitTimeout.count()));
-        return CommitStatus::Unavailable;
+        return CommitStatus::Pending;
     }
 
     try
