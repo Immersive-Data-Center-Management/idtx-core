@@ -101,7 +101,7 @@ public:
      * composition-safe way to remove a prim a weaker layer defines; it prunes
      * the prim and its subtree from the composed stage. The prim itself remains
      * retrievable via GetPrimAtPath (inactive), which is why callers must gate
-     * the resulting resync notice with Session::set_active_in_progress.
+     * the resulting resync notice with AuthoringContext::setting_active.
      *
      * When @p active is false the prim must be deletable: it must exist, must
      * not be the pseudo-root, and every opinion contributing to it must live on

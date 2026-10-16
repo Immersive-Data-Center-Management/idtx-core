@@ -141,6 +141,11 @@ struct CreatePrimCommand
  * stage; the prim is physically removed from the file only on commit. The
  * members are plain values, so the command is trivially nothrow-movable as the
  * mailbox requires.
+ *
+ * Pruning or restoring a subtree also drops or composes again every layer it
+ * references or payloads, so like PayloadCommand it runs holding
+ * idtx::concurrency::SharedLayers() shared and refreshes
+ * Session::used_layers.
  */
 struct SetPrimActiveCommand
 {
@@ -159,18 +164,49 @@ struct SetPrimActiveCommand
 };
 
 /**
+ * @brief Add or remove a payload arc on a prim (placeholder).
+ *
+ * Changes which layers the session's stage composes: adding loads the
+ * payload's file through the process-wide layer registry, possibly the same
+ * layer another stage uses or a reload is rewriting, and removing may drop
+ * the last reference to one. The consumer therefore runs it holding
+ * idtx::concurrency::SharedLayers() shared, deferring it while a reload is
+ * pending rather than blocking the worker, and refreshes
+ * Session::used_layers before releasing the lock.
+ *
+ * The authoring itself is not implemented yet; see
+ * SessionManager::HandleCommand(Session&, PayloadCommand&).
+ */
+struct PayloadCommand
+{
+    // Prim that carries (or receives) the payload arc.
+    std::string prim_path;
+
+    // Asset path of the payload's file, as the client sent it. Empty when
+    // removing.
+    std::string asset_path;
+
+    bool remove = false;
+
+    ConnectionId  origin{};
+    std::uint64_t request_id{};
+};
+
+/**
  * @brief Commit the session's overrides into the original USD file.
  *
- * The submitter waits on the future obtained from @c result.
+ * The consumer writes the file; the file's layer is then reloaded off the
+ * worker pool, and @c result is set once that reload is done. The submitter
+ * waits on the future obtained from @c result.
  */
 struct CommitCommand
 {
     std::promise<CommitResult> result;
-};
 
-/** @brief Reload the root layer from disk after the file changed. */
-struct ReloadCommand
-{
+    // Keeps the manager's single commit slot taken from submission until the
+    // reload of the written file has finished, wherever the commit ends:
+    // released when the last copy is destroyed.
+    std::shared_ptr<void> commit_slot;
 };
 
 /** @brief Save the session layer to its sidecar file if it is dirty. */
@@ -215,8 +251,8 @@ using SessionCommand = std::variant<
     JoinCommand,
     CreatePrimCommand,
     SetPrimActiveCommand,
+    PayloadCommand,
     CommitCommand,
-    ReloadCommand,
     FlushCommand,
     CorrectionCommand>;
 

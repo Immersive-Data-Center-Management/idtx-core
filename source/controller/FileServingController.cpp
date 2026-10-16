@@ -17,6 +17,7 @@
 #include <pxr/base/vt/dictionary.h>
 #include <pxr/usd/sdf/layer.h>
 
+#include "concurrency/SharedLayerLock.h"
 #include "dto/ErrorResponse.h"
 #include "dto/UploadDto.h"
 #include "session/SessionManager.h"
@@ -145,6 +146,10 @@ crow::response FileServingController::FileExists(const std::string& filepath)
             res.set_header("USD-ERROR", "File not found");
             return res;
         }
+
+        // The layer may be one a session's stage uses and a reload rewrites.
+        // Declared first so it outlives the layer handle.
+        std::shared_lock layers(idtx::concurrency::SharedLayers());
 
         pxr::SdfLayerRefPtr layer = pxr::SdfLayer::FindOrOpen(resolved.string());
         if (!layer)
@@ -330,10 +335,12 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                                          "Failed to finalise uploaded file: " + ec.message());
         }
 
-        // ---- Reload live sessions when this upload replaced an existing
-        // file. We only do this for real replacements (not brand-new files)
-        // because live sessions can only ever be bound to files that already
-        // existed at session-creation time. Errors here are logged but must
+        // ---- Reload the in-memory layer when this upload replaced an
+        // existing file, so every stage using it (sessions on this file and
+        // on files that reference it) sees the new content. Queued on the
+        // session manager's layer thread; does not block. We only do this
+        // for real replacements (not brand-new files) because no stage can
+        // have loaded a file that did not exist yet. Errors here are logged but must
         // not fail the HTTP response — the upload itself succeeded.
         if (target_existed_before && overwrite)
         {
@@ -341,19 +348,17 @@ crow::response FileServingController::UploadFile(const crow::request& req)
             {
                 try
                 {
-                    const std::size_t n = sm->SubmitReloadSessionsCommand(
-                        relative_path.generic_string());
-                    if (n > 0)
+                    if (sm->ReloadSharedLayer(relative_path.generic_string()))
                     {
                         IDTX_LOG(IDTX_INFO,
-                                 "Upload replaced '{}'; triggered reload on {} live session(s).",
-                                 relative_path.generic_string(), n);
+                                 "Upload replaced '{}'; queued a reload of its layer.",
+                                 relative_path.generic_string());
                     }
                 }
                 catch (const std::exception& e)
                 {
                     IDTX_LOG(IDTX_ERROR,
-                             "SubmitReloadSessionsCommand failed for '{}': {}",
+                             "ReloadSharedLayer failed for '{}': {}",
                              relative_path.generic_string(), e.what());
                 }
             }
