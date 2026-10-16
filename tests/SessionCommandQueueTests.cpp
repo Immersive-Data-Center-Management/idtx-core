@@ -72,6 +72,11 @@ bool IsSnapshotComplete(const idtxcore::BaseMessage& m)
     return m.message_case() == idtxcore::BaseMessage::kSnapshotComplete;
 }
 
+bool IsSetActiveBroadcast(const idtxcore::BaseMessage& m)
+{
+    return m.message_case() == idtxcore::BaseMessage::kSetPrimActiveBroadcast;
+}
+
 bool IsAckError(const idtxcore::BaseMessage& m, const std::string& error)
 {
     return IsAck(m) && !m.ack().ok() && m.ack().error() == error;
@@ -1146,4 +1151,242 @@ TEST_CASE("correction: queue_full is followed by a correction the client ends wi
     CHECK(tail_acks[1].ack().ok());
     MESSAGE("burst of " << kBurst << ": " << queue_full << " rejected with queue_full, "
                         << corrections << " correction(s)");
+}
+
+// ---------------------------------------------------------------------------
+// Prim deletion (soft delete via session-layer active=false)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("delete: soft-delete acks ok and broadcasts active=false to the originator")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "single_edit");
+
+    WsTestClient ws;
+    Join(ws, server, sid);
+
+    ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, kPrim, /*active=*/false, 7));
+    std::vector<idtxcore::BaseMessage> frames;
+    REQUIRE(WaitForAck(ws, 7, frames).has_value());
+
+    bool saw_delete = false;
+    for (const auto& m : frames)
+    {
+        if (IsSetActiveBroadcast(m) && m.set_prim_active_broadcast().prim_path() == kPrim)
+        {
+            saw_delete = true;
+            CHECK_FALSE(m.set_prim_active_broadcast().active());
+        }
+    }
+    CHECK(saw_delete);           // the originator receives the delete too
+    CHECK(frames.back().ack().ok());
+}
+
+TEST_CASE("delete: broadcast reaches every client including the origin")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "collaborative_edit");
+
+    WsTestClient a, b;
+    Join(a, server, sid);
+    Join(b, server, sid);
+
+    a.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, kPrim, /*active=*/false, 1));
+
+    const auto da = Collect(a, 1, std::chrono::seconds{5}, IsSetActiveBroadcast);
+    const auto db = Collect(b, 1, std::chrono::seconds{5}, IsSetActiveBroadcast);
+    REQUIRE(da.size() == 1);
+    REQUIRE(db.size() == 1);
+    CHECK(da.front().set_prim_active_broadcast().prim_path() == kPrim);
+    CHECK_FALSE(da.front().set_prim_active_broadcast().active());
+    CHECK(db.front().set_prim_active_broadcast().prim_path() == kPrim);
+    CHECK(da.front().server_seq() == db.front().server_seq());
+}
+
+TEST_CASE("delete: an unknown prim is rejected")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "single_edit");
+
+    WsTestClient ws;
+    Join(ws, server, sid);
+
+    ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, "/Root/DoesNotExist", false, 2));
+    std::vector<idtxcore::BaseMessage> frames;
+    REQUIRE(WaitForAck(ws, 2, frames).has_value());
+    CHECK(IsAckError(frames.back(), "unknown_prim"));
+}
+
+TEST_CASE("delete: a prim introduced across a reference cannot be deleted")
+{
+    TestServer server;
+    server.WaitReady();
+
+    // referenced.usda defines /Payload; ref_main.usda references it at /Root/Ref,
+    // so /Root/Ref draws opinions from a foreign layer and is not locally
+    // deletable even though its def is authored in the root layer.
+    {
+        std::ofstream ref(server.uploads_root() / "referenced.usda");
+        ref << "#usda 1.0\n(\n    defaultPrim = \"Payload\"\n)\n\n"
+               "def Xform \"Payload\"\n{\n    def Xform \"Inner\"\n    {\n    }\n}\n";
+    }
+    {
+        std::ofstream main_layer(server.uploads_root() / "ref_main.usda");
+        main_layer << "#usda 1.0\n(\n    defaultPrim = \"Root\"\n)\n\n"
+                      "def Xform \"Root\"\n{\n"
+                      "    def Xform \"Ref\" (\n"
+                      "        references = @./referenced.usda@</Payload>\n"
+                      "    )\n    {\n    }\n}\n";
+    }
+
+    const std::string sid = CreateSession(server, "single_edit", "ref_main.usda");
+
+    WsTestClient ws;
+    Join(ws, server, sid);
+
+    ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, "/Root/Ref", false, 3));
+    std::vector<idtxcore::BaseMessage> frames;
+    REQUIRE(WaitForAck(ws, 3, frames).has_value());
+    CHECK(IsAckError(frames.back(), "not_deletable"));
+}
+
+TEST_CASE("delete: commit physically removes the soft-deleted prim from the file")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "single_edit");
+
+    WsTestClient ws;
+    Join(ws, server, sid);
+
+    ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, kPrim, /*active=*/false, 1));
+    std::vector<idtxcore::BaseMessage> frames;
+    REQUIRE(WaitForAck(ws, 1, frames).has_value());
+    REQUIRE(frames.back().ack().ok());
+
+    HttpTestClient http;
+    const auto commit = http.PostJson(
+        server.base_http_url() + "/api/v1/sessions/" + sid + "/commit", "{}");
+    REQUIRE(commit.status == 200);
+    CHECK(json::parse(commit.text).value("committed", false));
+
+    // The deleted prim is gone entirely (not merely inactive); its parent stays.
+    CHECK_FALSE(idtx::tests::PrimExistsInFile(server.uploads_root() / "cube.usda", kPrim));
+    CHECK(idtx::tests::PrimExistsInFile(server.uploads_root() / "cube.usda", "/Root"));
+}
+
+TEST_CASE("delete: late joiner replays a created-then-deleted prim then deactivates it")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "collaborative_edit");
+
+    WsTestClient a;
+    Join(a, server, sid);
+
+    a.SendBinary(idtx::tests::BuildCreatePrimRequest(sid, "/Root", idtxcore::PRIM_TYPE_SPHERE, 1));
+    const auto created = Collect(
+        a, 1, std::chrono::seconds{5},
+        [](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kCreatePrimBroadcast;
+        });
+    REQUIRE(created.size() == 1);
+    const std::string name = created.front().create_prim_broadcast().prim_name();
+    const std::string path = "/Root/" + name;
+
+    a.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, path, /*active=*/false, 2));
+    std::vector<idtxcore::BaseMessage> del;
+    REQUIRE(WaitForAck(a, 2, del).has_value());
+    REQUIRE(del.back().ack().ok());
+
+    // A late joiner must receive BOTH the create frame (so the prim and its
+    // subtree exist, enabling a cheap undo) and the active=false frame (so it
+    // is pruned), before SnapshotComplete.
+    WsTestClient b;
+    auto conn = b.Connect("127.0.0.1", server.port(), "/ws?sid=" + sid);
+    REQUIRE(conn.handshake_ok);
+
+    bool complete = false, saw_create = false, saw_delete = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (!complete && std::chrono::steady_clock::now() < deadline)
+    {
+        auto frame = b.ReadBinary(std::chrono::milliseconds{2000});
+        if (!frame) break;
+        idtxcore::BaseMessage msg;
+        if (!idtx::tests::ParseBaseMessage(*frame, msg)) continue;
+        if (msg.message_case() == idtxcore::BaseMessage::kCreatePrimBroadcast
+            && msg.create_prim_broadcast().prim_name() == name)
+            saw_create = true;
+        else if (IsSetActiveBroadcast(msg)
+                 && msg.set_prim_active_broadcast().prim_path() == path)
+        {
+            saw_delete = true;
+            CHECK_FALSE(msg.set_prim_active_broadcast().active());
+        }
+        else if (IsSnapshotComplete(msg))
+            complete = true;
+    }
+    REQUIRE(complete);
+    CHECK(saw_create);
+    CHECK(saw_delete);
+}
+
+TEST_CASE("delete: undo reactivates and broadcasts active=true")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "single_edit");
+
+    WsTestClient ws;
+    Join(ws, server, sid);
+
+    ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, kPrim, /*active=*/false, 1));
+    std::vector<idtxcore::BaseMessage> del;
+    REQUIRE(WaitForAck(ws, 1, del).has_value());
+    REQUIRE(del.back().ack().ok());
+
+    ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, kPrim, /*active=*/true, 2));
+    std::vector<idtxcore::BaseMessage> undo;
+    REQUIRE(WaitForAck(ws, 2, undo).has_value());
+    CHECK(undo.back().ack().ok());
+
+    bool saw_reactivate = false;
+    for (const auto& m : undo)
+    {
+        if (IsSetActiveBroadcast(m) && m.set_prim_active_broadcast().prim_path() == kPrim)
+        {
+            saw_reactivate = true;
+            CHECK(m.set_prim_active_broadcast().active());
+        }
+    }
+    CHECK(saw_reactivate);
+}
+
+TEST_CASE("delete: deleting an already-deleted prim is idempotent")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "single_edit");
+
+    WsTestClient ws;
+    Join(ws, server, sid);
+
+    ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, kPrim, false, 1));
+    std::vector<idtxcore::BaseMessage> first;
+    REQUIRE(WaitForAck(ws, 1, first).has_value());
+    REQUIRE(first.back().ack().ok());
+    const std::uint64_t seq_after_first = first.back().server_seq();
+
+    ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, kPrim, false, 2));
+    std::vector<idtxcore::BaseMessage> second;
+    REQUIRE(WaitForAck(ws, 2, second).has_value());
+    CHECK(second.back().ack().ok());
+    // No state change the second time: the version does not advance and no new
+    // delete broadcast is produced.
+    CHECK(second.back().server_seq() == seq_after_first);
+    for (const auto& m : second)
+        CHECK_FALSE(IsSetActiveBroadcast(m));
 }

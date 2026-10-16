@@ -131,4 +131,21 @@ bool ReadTranslate(const std::filesystem::path& usd_file,
     return true;
 }
 
+bool PrimExistsInFile(const std::filesystem::path& usd_file,
+                      const std::string& prim_path)
+{
+    auto layer = pxr::SdfLayer::OpenAsAnonymous(usd_file.string());
+    if (!layer) return false;
+    auto stage = pxr::UsdStage::Open(layer);
+    if (!stage) return false;
+
+    if (!pxr::SdfPath::IsValidPathString(prim_path)) return false;
+    // Load the prim regardless of its active state; a committed delete should
+    // have removed the prim entirely, so even the all-prims predicate finds
+    // nothing.
+    const pxr::UsdPrim prim =
+        stage->GetPrimAtPath(pxr::SdfPath(prim_path));
+    return static_cast<bool>(prim);
+}
+
 } // namespace idtx::tests

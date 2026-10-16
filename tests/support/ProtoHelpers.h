@@ -38,6 +38,14 @@ std::string BuildCreatePrimRequest(const std::string& session_id,
                                    idtxcore::PrimType type,
                                    std::uint64_t request_id = 0);
 
+/// Build a serialized BaseMessage containing a SetPrimActiveRequest for
+/// @p prim_path. @p active == false is a soft delete, true is its undo.
+/// @p request_id is set on the enclosing BaseMessage and echoed back in the Ack.
+std::string BuildSetPrimActiveRequest(const std::string& session_id,
+                                      const std::string& prim_path,
+                                      bool active,
+                                      std::uint64_t request_id = 0);
+
 /// Parse a wire-format BaseMessage. Returns true on success.
 bool ParseBaseMessage(const std::string& bytes, idtxcore::BaseMessage& out);
 

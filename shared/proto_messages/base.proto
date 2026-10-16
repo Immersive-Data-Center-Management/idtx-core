@@ -55,6 +55,8 @@ message BaseMessage {
     SnapshotComplete snapshot_complete = 7;
     CreatePrimRequest create_prim = 10;
     CreatePrimBroadcast create_prim_broadcast = 11;
+    SetPrimActiveRequest set_prim_active = 12;
+    SetPrimActiveBroadcast set_prim_active_broadcast = 13;
   }
   uint64 request_id = 8;
   uint64 server_seq = 9;

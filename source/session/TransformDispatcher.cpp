@@ -3,6 +3,9 @@
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/base/gf/vec3f.h>
+#include <pxr/base/vt/value.h>
+#include <pxr/usd/sdf/attributeSpec.h>
+#include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
@@ -177,6 +180,66 @@ bool TransformDispatcher::Apply(const pxr::UsdStageRefPtr& stage,
                  prim_path_str, e.what());
         return false;
     }
+}
+
+bool TransformDispatcher::ReadAuthoredLocalTransform(
+    const pxr::SdfPrimSpecHandle& prim_spec,
+    idtxcore::SeparateTransform& out_sep,
+    idtxcore::Matrix4dTransform& out_mat,
+    bool& out_use_matrix)
+{
+    if (!prim_spec) return false;
+    const pxr::SdfLayerHandle layer = prim_spec->GetLayer();
+    if (!layer) return false;
+    const pxr::SdfPath base = prim_spec->GetPath();
+
+    // Op attribute names must match what Apply() authors (see AddTranslateOp /
+    // AddRotateXYZOp / AddScaleOp / AddTransformOp, all with no op suffix).
+    const auto attr_default = [&](const char* op_name) -> pxr::VtValue
+    {
+        const pxr::SdfAttributeSpecHandle attr =
+            layer->GetAttributeAtPath(base.AppendProperty(pxr::TfToken(op_name)));
+        return attr ? attr->GetDefaultValue() : pxr::VtValue();
+    };
+
+    // Matrix shape: a single xformOp:transform.
+    const pxr::VtValue xf = attr_default("xformOp:transform");
+    if (xf.IsHolding<pxr::GfMatrix4d>())
+    {
+        const pxr::GfMatrix4d& m = xf.UncheckedGet<pxr::GfMatrix4d>();
+        out_mat.set_m00(m[0][0]); out_mat.set_m01(m[0][1]); out_mat.set_m02(m[0][2]); out_mat.set_m03(m[0][3]);
+        out_mat.set_m10(m[1][0]); out_mat.set_m11(m[1][1]); out_mat.set_m12(m[1][2]); out_mat.set_m13(m[1][3]);
+        out_mat.set_m20(m[2][0]); out_mat.set_m21(m[2][1]); out_mat.set_m22(m[2][2]); out_mat.set_m23(m[2][3]);
+        out_mat.set_m30(m[3][0]); out_mat.set_m31(m[3][1]); out_mat.set_m32(m[3][2]); out_mat.set_m33(m[3][3]);
+        out_use_matrix = true;
+        return true;
+    }
+
+    // Separate shape: translate + rotateXYZ + scale. Any op the dispatcher
+    // omitted defaults to the identity component.
+    const pxr::VtValue t = attr_default("xformOp:translate");
+    const pxr::VtValue r = attr_default("xformOp:rotateXYZ");
+    const pxr::VtValue s = attr_default("xformOp:scale");
+    if (t.IsEmpty() && r.IsEmpty() && s.IsEmpty()) return false;
+
+    pxr::GfVec3d tv(0.0);
+    pxr::GfVec3f rv(0.0f);
+    pxr::GfVec3f sv(1.0f);
+    if (t.IsHolding<pxr::GfVec3d>()) tv = t.UncheckedGet<pxr::GfVec3d>();
+    if (r.IsHolding<pxr::GfVec3f>()) rv = r.UncheckedGet<pxr::GfVec3f>();
+    if (s.IsHolding<pxr::GfVec3f>()) sv = s.UncheckedGet<pxr::GfVec3f>();
+
+    out_sep.mutable_translation()->set_x(tv[0]);
+    out_sep.mutable_translation()->set_y(tv[1]);
+    out_sep.mutable_translation()->set_z(tv[2]);
+    out_sep.mutable_rotation()->set_x(rv[0]);
+    out_sep.mutable_rotation()->set_y(rv[1]);
+    out_sep.mutable_rotation()->set_z(rv[2]);
+    out_sep.mutable_scale()->set_x(sv[0]);
+    out_sep.mutable_scale()->set_y(sv[1]);
+    out_sep.mutable_scale()->set_z(sv[2]);
+    out_use_matrix = false;
+    return true;
 }
 
 } // namespace session

@@ -78,6 +78,46 @@ public:
                        CreatedPrim& out);
 
     /**
+     * @brief Outcome of a SetActive() request.
+     */
+    enum class SetActiveStatus
+    {
+        Ok,             ///< The flag was authored; a broadcast should follow.
+        AlreadyInState, ///< The prim already had the requested active state.
+        InvalidPath,    ///< @p prim_path is empty or not a valid prim path.
+        NotFound,       ///< No prim is defined at @p prim_path.
+        NotDeletable,   ///< The prim is the pseudo-root, or is introduced across
+                        ///< a reference/payload or defined in a sublayer, so it
+                        ///< cannot be deleted via a session-layer opinion.
+        Failed          ///< USD rejected the authoring call.
+    };
+
+    /**
+     * @brief Set the active state of the prim at @p prim_path (soft delete when
+     *        @p active is false, undo when true).
+     *
+     * Must be called from the session's command consumer, with the stage's edit
+     * target set to the session layer. Authoring `active=false` is the only
+     * composition-safe way to remove a prim a weaker layer defines; it prunes
+     * the prim and its subtree from the composed stage. The prim itself remains
+     * retrievable via GetPrimAtPath (inactive), which is why callers must gate
+     * the resulting resync notice with Session::set_active_in_progress.
+     *
+     * When @p active is false the prim must be deletable: it must exist, must
+     * not be the pseudo-root, and every opinion contributing to it must live on
+     * the stage's root layer or this session's layer (never a sublayer or a
+     * layer pulled in across a reference/payload). This covers both a
+     * root-authored prim and a prim created earlier in this session (whose only
+     * `def` is on the session layer). When @p active is true (undo) only
+     * existence is required.
+     *
+     * @return The granular outcome; never throws.
+     */
+    static SetActiveStatus SetActive(const pxr::UsdStageRefPtr& stage,
+                                     const std::string& prim_path,
+                                     bool active);
+
+    /**
      * @brief Map a USD prim type name (e.g. "Cube") to its PrimType, or
      *        PRIM_TYPE_UNSPECIFIED when it is not one of the built-ins this
      *        dispatcher creates. Used by the join snapshot to recognize prims
@@ -94,6 +134,19 @@ public:
     static void ReadAttributes(const pxr::UsdPrim& prim,
                                idtxcore::PrimType type,
                                CreatedPrim& out);
+
+    /**
+     * @brief Fill @p out with the schema fallback geometry attributes for
+     *        @p type, read from the USD schema registry rather than a live
+     *        prim. Only the members that apply to @p type are set.
+     *
+     * The unified Sdf-based join snapshot describes session-created prims
+     * without composing a stage, so it cannot read fallbacks off a UsdPrim
+     * (ReadAttributes). A created prim never authors its shape attributes into
+     * the session layer, so its values are exactly the type's schema
+     * fallbacks, which this returns stage-free.
+     */
+    static void ReadSchemaDefaults(idtxcore::PrimType type, CreatedPrim& out);
 };
 
 } // namespace session

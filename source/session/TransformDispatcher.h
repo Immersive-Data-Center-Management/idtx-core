@@ -10,6 +10,7 @@
 #pragma once
 
 #include <pxr/pxr.h>
+#include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/usd/stage.h>
 
 #include <idtx/utils/Logger.h>
@@ -41,6 +42,30 @@ public:
      */
     static bool Apply(const pxr::UsdStageRefPtr& stage,
                       const idtxcore::TransformUpdate& upd);
+
+    /**
+     * @brief Read the local transform authored on @p prim_spec straight from
+     *        the layer, without composing a stage.
+     *
+     * Apply() always resets the op stack and authors one canonical shape:
+     * either translate + rotateXYZ + scale, or a single transform matrix. This
+     * reader mirrors that exact shape, so for any prim the dispatcher ever
+     * moved it reconstructs the same transform the composed stage would resolve
+     * — which lets the join snapshot describe prims (including the pruned
+     * children of a soft-deleted prim) with pure Sdf reads.
+     *
+     * IMPORTANT: this is coupled to what Apply() authors. If Apply() changes
+     * the op names, precisions, or t-r-s-vs-matrix choice, update this too (and
+     * the round-trip test that pins them together).
+     *
+     * @return true and fills exactly one of @p out_sep / @p out_mat (selected
+     *         by @p out_use_matrix) when the spec authors xform ops; false when
+     *         it authors none (the client already holds the base transform).
+     */
+    static bool ReadAuthoredLocalTransform(const pxr::SdfPrimSpecHandle& prim_spec,
+                                           idtxcore::SeparateTransform& out_sep,
+                                           idtxcore::Matrix4dTransform& out_mat,
+                                           bool& out_use_matrix);
 };
 
 } // namespace session

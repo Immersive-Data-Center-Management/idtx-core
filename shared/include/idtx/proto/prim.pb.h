@@ -64,6 +64,14 @@ class CreatePrimRequest;
 struct CreatePrimRequestDefaultTypeInternal;
 extern CreatePrimRequestDefaultTypeInternal _CreatePrimRequest_default_instance_;
 extern const ::google::protobuf::internal::ClassDataFull CreatePrimRequest_class_data_;
+class SetPrimActiveBroadcast;
+struct SetPrimActiveBroadcastDefaultTypeInternal;
+extern SetPrimActiveBroadcastDefaultTypeInternal _SetPrimActiveBroadcast_default_instance_;
+extern const ::google::protobuf::internal::ClassDataFull SetPrimActiveBroadcast_class_data_;
+class SetPrimActiveRequest;
+struct SetPrimActiveRequestDefaultTypeInternal;
+extern SetPrimActiveRequestDefaultTypeInternal _SetPrimActiveRequest_default_instance_;
+extern const ::google::protobuf::internal::ClassDataFull SetPrimActiveRequest_class_data_;
 }  // namespace idtxcore
 namespace google {
 namespace protobuf {
@@ -119,6 +127,437 @@ inline bool PrimType_Parse(
 // ===================================================================
 
 
+// -------------------------------------------------------------------
+
+class SetPrimActiveRequest final : public ::google::protobuf::Message
+/* @@protoc_insertion_point(class_definition:idtxcore.SetPrimActiveRequest) */ {
+ public:
+  inline SetPrimActiveRequest() : SetPrimActiveRequest(nullptr) {}
+  ~SetPrimActiveRequest() PROTOBUF_FINAL;
+
+#if defined(PROTOBUF_CUSTOM_VTABLE)
+  void operator delete(SetPrimActiveRequest* PROTOBUF_NONNULL msg, ::std::destroying_delete_t) {
+    SharedDtor(*msg);
+    ::google::protobuf::internal::SizedDelete(msg, sizeof(SetPrimActiveRequest));
+  }
+#endif
+
+  template <typename = void>
+  explicit PROTOBUF_CONSTEXPR SetPrimActiveRequest(::google::protobuf::internal::ConstantInitialized);
+
+  inline SetPrimActiveRequest(const SetPrimActiveRequest& from) : SetPrimActiveRequest(nullptr, from) {}
+  inline SetPrimActiveRequest(SetPrimActiveRequest&& from) noexcept
+      : SetPrimActiveRequest(nullptr, ::std::move(from)) {}
+  inline SetPrimActiveRequest& operator=(const SetPrimActiveRequest& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline SetPrimActiveRequest& operator=(SetPrimActiveRequest&& from) noexcept {
+    if (this == &from) return *this;
+    if (::google::protobuf::internal::CanMoveWithInternalSwap(GetArena(), from.GetArena())) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  inline const ::google::protobuf::UnknownFieldSet& unknown_fields() const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.unknown_fields<::google::protobuf::UnknownFieldSet>(::google::protobuf::UnknownFieldSet::default_instance);
+  }
+  inline ::google::protobuf::UnknownFieldSet* PROTOBUF_NONNULL mutable_unknown_fields()
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.mutable_unknown_fields<::google::protobuf::UnknownFieldSet>();
+  }
+
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL descriptor() {
+    return GetDescriptor();
+  }
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::google::protobuf::Reflection* PROTOBUF_NONNULL GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const SetPrimActiveRequest& default_instance() {
+    return *reinterpret_cast<const SetPrimActiveRequest*>(
+        &_SetPrimActiveRequest_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages = 2;
+  friend void swap(SetPrimActiveRequest& a, SetPrimActiveRequest& b) { a.Swap(&b); }
+  inline void Swap(SetPrimActiveRequest* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    if (::google::protobuf::internal::CanUseInternalSwap(GetArena(), other->GetArena())) {
+      InternalSwap(other);
+    } else {
+      ::google::protobuf::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(SetPrimActiveRequest* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    ABSL_DCHECK(GetArena() == other->GetArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  SetPrimActiveRequest* PROTOBUF_NONNULL New(::google::protobuf::Arena* PROTOBUF_NULLABLE arena = nullptr) const {
+    return ::google::protobuf::Message::DefaultConstruct<SetPrimActiveRequest>(arena);
+  }
+  using ::google::protobuf::Message::CopyFrom;
+  void CopyFrom(const SetPrimActiveRequest& from);
+  using ::google::protobuf::Message::MergeFrom;
+  void MergeFrom(const SetPrimActiveRequest& from) { SetPrimActiveRequest::MergeImpl(*this, from); }
+
+  private:
+  static void MergeImpl(::google::protobuf::MessageLite& to_msg,
+                        const ::google::protobuf::MessageLite& from_msg);
+
+  public:
+  bool IsInitialized() const {
+    return true;
+  }
+  ABSL_ATTRIBUTE_REINITIALIZES void Clear() PROTOBUF_FINAL;
+  #if defined(PROTOBUF_CUSTOM_VTABLE)
+  private:
+  static ::size_t ByteSizeLong(const ::google::protobuf::MessageLite& msg);
+  static ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      const ::google::protobuf::MessageLite& msg, ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream);
+
+  public:
+  ::size_t ByteSizeLong() const { return ByteSizeLong(*this); }
+  ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream) const {
+    return _InternalSerialize(*this, target, stream);
+  }
+  #else   // PROTOBUF_CUSTOM_VTABLE
+  ::size_t ByteSizeLong() const final;
+  ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream) const final;
+  #endif  // PROTOBUF_CUSTOM_VTABLE
+  int GetCachedSize() const { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static void SharedDtor(MessageLite& self);
+  void InternalSwap(SetPrimActiveRequest* PROTOBUF_NONNULL other);
+ private:
+  template <typename T>
+  friend ::absl::string_view(::google::protobuf::internal::GetAnyMessageName)();
+  static ::absl::string_view FullMessageName() { return "idtxcore.SetPrimActiveRequest"; }
+
+  explicit SetPrimActiveRequest(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  SetPrimActiveRequest(::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const SetPrimActiveRequest& from);
+  SetPrimActiveRequest(
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, SetPrimActiveRequest&& from) noexcept
+      : SetPrimActiveRequest(arena) {
+    *this = ::std::move(from);
+  }
+  const ::google::protobuf::internal::ClassData* PROTOBUF_NONNULL GetClassData() const PROTOBUF_FINAL;
+  static void* PROTOBUF_NONNULL PlacementNew_(
+      const void* PROTOBUF_NONNULL, void* PROTOBUF_NONNULL mem,
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static constexpr auto InternalNewImpl_();
+
+ public:
+  static constexpr auto InternalGenerateClassData_();
+
+  ::google::protobuf::Metadata GetMetadata() const;
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+  enum : int {
+    kSessionIdFieldNumber = 1,
+    kPrimPathFieldNumber = 2,
+    kActiveFieldNumber = 3,
+  };
+  // string session_id = 1;
+  void clear_session_id() ;
+  const ::std::string& session_id() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_session_id(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_session_id();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_session_id();
+  void set_allocated_session_id(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_session_id() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_session_id(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_session_id();
+
+  public:
+  // string prim_path = 2;
+  void clear_prim_path() ;
+  const ::std::string& prim_path() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_prim_path(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_prim_path();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_prim_path();
+  void set_allocated_prim_path(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_prim_path() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_prim_path(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_prim_path();
+
+  public:
+  // bool active = 3;
+  void clear_active() ;
+  bool active() const;
+  void set_active(bool value);
+
+  private:
+  bool _internal_active() const;
+  void _internal_set_active(bool value);
+
+  public:
+  // @@protoc_insertion_point(class_scope:idtxcore.SetPrimActiveRequest)
+ private:
+  class _Internal;
+  friend class ::google::protobuf::internal::TcParser;
+  static const ::google::protobuf::internal::TcParseTable<2, 3,
+                                   0, 57,
+                                   2>
+      _table_;
+
+  friend class ::google::protobuf::MessageLite;
+  friend class ::google::protobuf::Arena;
+  template <typename T>
+  friend class ::google::protobuf::Arena::InternalHelper;
+  using InternalArenaConstructable_ = void;
+  using DestructorSkippable_ = void;
+  struct Impl_ {
+    inline explicit constexpr Impl_(::google::protobuf::internal::ConstantInitialized) noexcept;
+    inline explicit Impl_(
+        ::google::protobuf::internal::InternalVisibility visibility,
+        ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+    inline explicit Impl_(
+        ::google::protobuf::internal::InternalVisibility visibility,
+        ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const Impl_& from,
+        const SetPrimActiveRequest& from_msg);
+    ::google::protobuf::internal::HasBits<1> _has_bits_;
+    ::google::protobuf::internal::CachedSize _cached_size_;
+    ::google::protobuf::internal::ArenaStringPtr session_id_;
+    ::google::protobuf::internal::ArenaStringPtr prim_path_;
+    bool active_;
+    PROTOBUF_TSAN_DECLARE_MEMBER
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_prim_2eproto;
+};
+
+extern const ::google::protobuf::internal::ClassDataFull SetPrimActiveRequest_class_data_;
+// -------------------------------------------------------------------
+
+class SetPrimActiveBroadcast final : public ::google::protobuf::Message
+/* @@protoc_insertion_point(class_definition:idtxcore.SetPrimActiveBroadcast) */ {
+ public:
+  inline SetPrimActiveBroadcast() : SetPrimActiveBroadcast(nullptr) {}
+  ~SetPrimActiveBroadcast() PROTOBUF_FINAL;
+
+#if defined(PROTOBUF_CUSTOM_VTABLE)
+  void operator delete(SetPrimActiveBroadcast* PROTOBUF_NONNULL msg, ::std::destroying_delete_t) {
+    SharedDtor(*msg);
+    ::google::protobuf::internal::SizedDelete(msg, sizeof(SetPrimActiveBroadcast));
+  }
+#endif
+
+  template <typename = void>
+  explicit PROTOBUF_CONSTEXPR SetPrimActiveBroadcast(::google::protobuf::internal::ConstantInitialized);
+
+  inline SetPrimActiveBroadcast(const SetPrimActiveBroadcast& from) : SetPrimActiveBroadcast(nullptr, from) {}
+  inline SetPrimActiveBroadcast(SetPrimActiveBroadcast&& from) noexcept
+      : SetPrimActiveBroadcast(nullptr, ::std::move(from)) {}
+  inline SetPrimActiveBroadcast& operator=(const SetPrimActiveBroadcast& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline SetPrimActiveBroadcast& operator=(SetPrimActiveBroadcast&& from) noexcept {
+    if (this == &from) return *this;
+    if (::google::protobuf::internal::CanMoveWithInternalSwap(GetArena(), from.GetArena())) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  inline const ::google::protobuf::UnknownFieldSet& unknown_fields() const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.unknown_fields<::google::protobuf::UnknownFieldSet>(::google::protobuf::UnknownFieldSet::default_instance);
+  }
+  inline ::google::protobuf::UnknownFieldSet* PROTOBUF_NONNULL mutable_unknown_fields()
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.mutable_unknown_fields<::google::protobuf::UnknownFieldSet>();
+  }
+
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL descriptor() {
+    return GetDescriptor();
+  }
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::google::protobuf::Reflection* PROTOBUF_NONNULL GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const SetPrimActiveBroadcast& default_instance() {
+    return *reinterpret_cast<const SetPrimActiveBroadcast*>(
+        &_SetPrimActiveBroadcast_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages = 3;
+  friend void swap(SetPrimActiveBroadcast& a, SetPrimActiveBroadcast& b) { a.Swap(&b); }
+  inline void Swap(SetPrimActiveBroadcast* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    if (::google::protobuf::internal::CanUseInternalSwap(GetArena(), other->GetArena())) {
+      InternalSwap(other);
+    } else {
+      ::google::protobuf::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(SetPrimActiveBroadcast* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    ABSL_DCHECK(GetArena() == other->GetArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  SetPrimActiveBroadcast* PROTOBUF_NONNULL New(::google::protobuf::Arena* PROTOBUF_NULLABLE arena = nullptr) const {
+    return ::google::protobuf::Message::DefaultConstruct<SetPrimActiveBroadcast>(arena);
+  }
+  using ::google::protobuf::Message::CopyFrom;
+  void CopyFrom(const SetPrimActiveBroadcast& from);
+  using ::google::protobuf::Message::MergeFrom;
+  void MergeFrom(const SetPrimActiveBroadcast& from) { SetPrimActiveBroadcast::MergeImpl(*this, from); }
+
+  private:
+  static void MergeImpl(::google::protobuf::MessageLite& to_msg,
+                        const ::google::protobuf::MessageLite& from_msg);
+
+  public:
+  bool IsInitialized() const {
+    return true;
+  }
+  ABSL_ATTRIBUTE_REINITIALIZES void Clear() PROTOBUF_FINAL;
+  #if defined(PROTOBUF_CUSTOM_VTABLE)
+  private:
+  static ::size_t ByteSizeLong(const ::google::protobuf::MessageLite& msg);
+  static ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      const ::google::protobuf::MessageLite& msg, ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream);
+
+  public:
+  ::size_t ByteSizeLong() const { return ByteSizeLong(*this); }
+  ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream) const {
+    return _InternalSerialize(*this, target, stream);
+  }
+  #else   // PROTOBUF_CUSTOM_VTABLE
+  ::size_t ByteSizeLong() const final;
+  ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream) const final;
+  #endif  // PROTOBUF_CUSTOM_VTABLE
+  int GetCachedSize() const { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static void SharedDtor(MessageLite& self);
+  void InternalSwap(SetPrimActiveBroadcast* PROTOBUF_NONNULL other);
+ private:
+  template <typename T>
+  friend ::absl::string_view(::google::protobuf::internal::GetAnyMessageName)();
+  static ::absl::string_view FullMessageName() { return "idtxcore.SetPrimActiveBroadcast"; }
+
+  explicit SetPrimActiveBroadcast(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  SetPrimActiveBroadcast(::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const SetPrimActiveBroadcast& from);
+  SetPrimActiveBroadcast(
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, SetPrimActiveBroadcast&& from) noexcept
+      : SetPrimActiveBroadcast(arena) {
+    *this = ::std::move(from);
+  }
+  const ::google::protobuf::internal::ClassData* PROTOBUF_NONNULL GetClassData() const PROTOBUF_FINAL;
+  static void* PROTOBUF_NONNULL PlacementNew_(
+      const void* PROTOBUF_NONNULL, void* PROTOBUF_NONNULL mem,
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static constexpr auto InternalNewImpl_();
+
+ public:
+  static constexpr auto InternalGenerateClassData_();
+
+  ::google::protobuf::Metadata GetMetadata() const;
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+  enum : int {
+    kPrimPathFieldNumber = 1,
+    kActiveFieldNumber = 2,
+  };
+  // string prim_path = 1;
+  void clear_prim_path() ;
+  const ::std::string& prim_path() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_prim_path(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_prim_path();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_prim_path();
+  void set_allocated_prim_path(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_prim_path() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_prim_path(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_prim_path();
+
+  public:
+  // bool active = 2;
+  void clear_active() ;
+  bool active() const;
+  void set_active(bool value);
+
+  private:
+  bool _internal_active() const;
+  void _internal_set_active(bool value);
+
+  public:
+  // @@protoc_insertion_point(class_scope:idtxcore.SetPrimActiveBroadcast)
+ private:
+  class _Internal;
+  friend class ::google::protobuf::internal::TcParser;
+  static const ::google::protobuf::internal::TcParseTable<1, 2,
+                                   0, 49,
+                                   2>
+      _table_;
+
+  friend class ::google::protobuf::MessageLite;
+  friend class ::google::protobuf::Arena;
+  template <typename T>
+  friend class ::google::protobuf::Arena::InternalHelper;
+  using InternalArenaConstructable_ = void;
+  using DestructorSkippable_ = void;
+  struct Impl_ {
+    inline explicit constexpr Impl_(::google::protobuf::internal::ConstantInitialized) noexcept;
+    inline explicit Impl_(
+        ::google::protobuf::internal::InternalVisibility visibility,
+        ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+    inline explicit Impl_(
+        ::google::protobuf::internal::InternalVisibility visibility,
+        ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const Impl_& from,
+        const SetPrimActiveBroadcast& from_msg);
+    ::google::protobuf::internal::HasBits<1> _has_bits_;
+    ::google::protobuf::internal::CachedSize _cached_size_;
+    ::google::protobuf::internal::ArenaStringPtr prim_path_;
+    bool active_;
+    PROTOBUF_TSAN_DECLARE_MEMBER
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_prim_2eproto;
+};
+
+extern const ::google::protobuf::internal::ClassDataFull SetPrimActiveBroadcast_class_data_;
 // -------------------------------------------------------------------
 
 class CreatePrimRequest final : public ::google::protobuf::Message
@@ -1109,6 +1548,259 @@ inline void CreatePrimBroadcast::set_allocated_axis(::std::string* PROTOBUF_NULL
     _impl_.axis_.Set("", GetArena());
   }
   // @@protoc_insertion_point(field_set_allocated:idtxcore.CreatePrimBroadcast.axis)
+}
+
+// -------------------------------------------------------------------
+
+// SetPrimActiveRequest
+
+// string session_id = 1;
+inline void SetPrimActiveRequest::clear_session_id() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.session_id_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000001U);
+}
+inline const ::std::string& SetPrimActiveRequest::session_id() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.SetPrimActiveRequest.session_id)
+  return _internal_session_id();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void SetPrimActiveRequest::set_session_id(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  _impl_.session_id_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:idtxcore.SetPrimActiveRequest.session_id)
+}
+inline ::std::string* PROTOBUF_NONNULL SetPrimActiveRequest::mutable_session_id()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  ::std::string* _s = _internal_mutable_session_id();
+  // @@protoc_insertion_point(field_mutable:idtxcore.SetPrimActiveRequest.session_id)
+  return _s;
+}
+inline const ::std::string& SetPrimActiveRequest::_internal_session_id() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.session_id_.Get();
+}
+inline void SetPrimActiveRequest::_internal_set_session_id(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.session_id_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL SetPrimActiveRequest::_internal_mutable_session_id() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.session_id_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE SetPrimActiveRequest::release_session_id() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:idtxcore.SetPrimActiveRequest.session_id)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000001U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  auto* released = _impl_.session_id_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.session_id_.Set("", GetArena());
+  }
+  return released;
+}
+inline void SetPrimActiveRequest::set_allocated_session_id(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  }
+  _impl_.session_id_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.session_id_.IsDefault()) {
+    _impl_.session_id_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:idtxcore.SetPrimActiveRequest.session_id)
+}
+
+// string prim_path = 2;
+inline void SetPrimActiveRequest::clear_prim_path() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.prim_path_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000002U);
+}
+inline const ::std::string& SetPrimActiveRequest::prim_path() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.SetPrimActiveRequest.prim_path)
+  return _internal_prim_path();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void SetPrimActiveRequest::set_prim_path(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  _impl_.prim_path_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:idtxcore.SetPrimActiveRequest.prim_path)
+}
+inline ::std::string* PROTOBUF_NONNULL SetPrimActiveRequest::mutable_prim_path()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ::std::string* _s = _internal_mutable_prim_path();
+  // @@protoc_insertion_point(field_mutable:idtxcore.SetPrimActiveRequest.prim_path)
+  return _s;
+}
+inline const ::std::string& SetPrimActiveRequest::_internal_prim_path() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.prim_path_.Get();
+}
+inline void SetPrimActiveRequest::_internal_set_prim_path(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.prim_path_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL SetPrimActiveRequest::_internal_mutable_prim_path() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.prim_path_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE SetPrimActiveRequest::release_prim_path() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:idtxcore.SetPrimActiveRequest.prim_path)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  auto* released = _impl_.prim_path_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.prim_path_.Set("", GetArena());
+  }
+  return released;
+}
+inline void SetPrimActiveRequest::set_allocated_prim_path(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  }
+  _impl_.prim_path_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.prim_path_.IsDefault()) {
+    _impl_.prim_path_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:idtxcore.SetPrimActiveRequest.prim_path)
+}
+
+// bool active = 3;
+inline void SetPrimActiveRequest::clear_active() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.active_ = false;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000004U);
+}
+inline bool SetPrimActiveRequest::active() const {
+  // @@protoc_insertion_point(field_get:idtxcore.SetPrimActiveRequest.active)
+  return _internal_active();
+}
+inline void SetPrimActiveRequest::set_active(bool value) {
+  _internal_set_active(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  // @@protoc_insertion_point(field_set:idtxcore.SetPrimActiveRequest.active)
+}
+inline bool SetPrimActiveRequest::_internal_active() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.active_;
+}
+inline void SetPrimActiveRequest::_internal_set_active(bool value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.active_ = value;
+}
+
+// -------------------------------------------------------------------
+
+// SetPrimActiveBroadcast
+
+// string prim_path = 1;
+inline void SetPrimActiveBroadcast::clear_prim_path() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.prim_path_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000001U);
+}
+inline const ::std::string& SetPrimActiveBroadcast::prim_path() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.SetPrimActiveBroadcast.prim_path)
+  return _internal_prim_path();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void SetPrimActiveBroadcast::set_prim_path(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  _impl_.prim_path_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:idtxcore.SetPrimActiveBroadcast.prim_path)
+}
+inline ::std::string* PROTOBUF_NONNULL SetPrimActiveBroadcast::mutable_prim_path()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  ::std::string* _s = _internal_mutable_prim_path();
+  // @@protoc_insertion_point(field_mutable:idtxcore.SetPrimActiveBroadcast.prim_path)
+  return _s;
+}
+inline const ::std::string& SetPrimActiveBroadcast::_internal_prim_path() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.prim_path_.Get();
+}
+inline void SetPrimActiveBroadcast::_internal_set_prim_path(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.prim_path_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL SetPrimActiveBroadcast::_internal_mutable_prim_path() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.prim_path_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE SetPrimActiveBroadcast::release_prim_path() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:idtxcore.SetPrimActiveBroadcast.prim_path)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000001U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  auto* released = _impl_.prim_path_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.prim_path_.Set("", GetArena());
+  }
+  return released;
+}
+inline void SetPrimActiveBroadcast::set_allocated_prim_path(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  }
+  _impl_.prim_path_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.prim_path_.IsDefault()) {
+    _impl_.prim_path_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:idtxcore.SetPrimActiveBroadcast.prim_path)
+}
+
+// bool active = 2;
+inline void SetPrimActiveBroadcast::clear_active() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.active_ = false;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000002U);
+}
+inline bool SetPrimActiveBroadcast::active() const {
+  // @@protoc_insertion_point(field_get:idtxcore.SetPrimActiveBroadcast.active)
+  return _internal_active();
+}
+inline void SetPrimActiveBroadcast::set_active(bool value) {
+  _internal_set_active(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  // @@protoc_insertion_point(field_set:idtxcore.SetPrimActiveBroadcast.active)
+}
+inline bool SetPrimActiveBroadcast::_internal_active() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.active_;
+}
+inline void SetPrimActiveBroadcast::_internal_set_active(bool value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.active_ = value;
 }
 
 #ifdef __GNUC__

@@ -246,8 +246,35 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
             if (ack_msg.SerializeToString(&payload)) conn.send_binary(payload);
             break;
         }
+        case idtxcore::BaseMessage::kSetPrimActive:
+        {
+            // Queue the active-state change (soft delete / undo) for the
+            // session's consumer. When accepted, the consumer authors the flag,
+            // broadcasts a SetPrimActiveBroadcast to every client (including
+            // this one) and sends this client the Ack. On an unknown or
+            // non-deletable prim it acks not-ok. Only a queue the session could
+            // not accept the request onto is answered here.
+            const std::uint64_t request_id = msg.request_id();
+            const idtxcore::SetPrimActiveRequest& req = msg.set_prim_active();
+            const auto status = m_manager_->SubmitSetPrimActiveCommand(
+                ws_data->session_id, req.prim_path(), req.active(),
+                ws_data->connection_id, request_id);
+            if (status == SubmitStatus::Accepted) break;
+
+            idtxcore::BaseMessage ack_msg;
+            ack_msg.set_session_id(ws_data->session_id);
+            ack_msg.set_request_id(request_id);
+            auto* ack = ack_msg.mutable_ack();
+            ack->set_ok(false);
+            ack->set_error(RejectionReason(status));
+
+            std::string payload;
+            if (ack_msg.SerializeToString(&payload)) conn.send_binary(payload);
+            break;
+        }
         case idtxcore::BaseMessage::kXformBroadcast:
         case idtxcore::BaseMessage::kCreatePrimBroadcast:
+        case idtxcore::BaseMessage::kSetPrimActiveBroadcast:
         case idtxcore::BaseMessage::kAck:
         case idtxcore::BaseMessage::kError:
         case idtxcore::BaseMessage::kSnapshotComplete:

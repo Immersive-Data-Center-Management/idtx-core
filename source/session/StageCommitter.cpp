@@ -13,6 +13,8 @@
 #include <vector>
 
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/sdf/zipFile.h>
 #include <pxr/usd/usdUtils/flattenLayerStack.h>
 
@@ -47,6 +49,52 @@ bool HasExtension(const std::string& path, const char* ext)
     return lower.ends_with(ext);
 }
 
+// Fold the session's soft deletes into @p merged: a prim the session marked
+// `active=false` is a delete request, so the prim (and its subtree) is removed
+// from the flattened layer before it is written back to the original file.
+//
+// The delete set is derived from the session layer itself (every prim spec with
+// an authored active=false), not from in-memory state, so it is correct after a
+// server restart that resumed the sidecar. We deliberately key off the session
+// layer rather than "every inactive prim in @p merged": a prim the *source*
+// file legitimately shipped inactive must survive the commit untouched.
+//
+// Covers both a root-authored prim (its session over carries active=false) and
+// a prim created-then-deleted this session (its session def carries
+// active=false); in both cases the flattened result holds the prim and we drop
+// it here. SetActive() already rejected prims defined across references/payloads
+// or in sublayers, so a path reaching here is always local to the flattened
+// root and safe to remove.
+void RemoveSoftDeletedPrims(const pxr::UsdStageRefPtr& stage,
+                            const pxr::SdfLayerRefPtr& merged)
+{
+    if (!stage || !merged) return;
+    const pxr::SdfLayerHandle session_layer = stage->GetSessionLayer();
+    if (!session_layer) return;
+
+    std::vector<pxr::SdfPath> deleted;
+    session_layer->Traverse(
+        pxr::SdfPath::AbsoluteRootPath(),
+        [&](const pxr::SdfPath& p)
+        {
+            if (!p.IsPrimPath()) return;
+            const pxr::SdfPrimSpecHandle spec = session_layer->GetPrimAtPath(p);
+            if (spec && spec->HasActive() && !spec->GetActive()) deleted.push_back(p);
+        });
+
+    for (const pxr::SdfPath& path : deleted)
+    {
+        const pxr::SdfPrimSpecHandle spec = merged->GetPrimAtPath(path);
+        if (!spec) continue; // already removed as part of a deleted ancestor
+        const pxr::SdfPath parent_path = path.GetParentPath();
+        const pxr::SdfPrimSpecHandle parent =
+            parent_path == pxr::SdfPath::AbsoluteRootPath()
+                ? merged->GetPseudoRoot()
+                : merged->GetPrimAtPath(parent_path);
+        if (parent) parent->RemoveNameChild(spec);
+    }
+}
+
 } // namespace
 
 bool StageCommitter::Commit(const pxr::UsdStageRefPtr& stage,
@@ -75,6 +123,10 @@ bool StageCommitter::CommitFlat(const pxr::UsdStageRefPtr& stage,
         out_error = "UsdUtilsFlattenLayerStack returned null";
         return false;
     }
+
+    // Fold the session's soft deletes in: a prim marked active=false is removed
+    // from the flattened layer so it does not survive into the committed file.
+    RemoveSoftDeletedPrims(stage, merged);
 
     // Write to a temp sibling first, then atomically rename over the original
     // so a failed/partial export can never truncate the source file. Preserve
@@ -118,6 +170,8 @@ bool StageCommitter::CommitUsdz(const pxr::UsdStageRefPtr& stage,
         out_error = "UsdUtilsFlattenLayerStack returned null";
         return false;
     }
+
+    RemoveSoftDeletedPrims(stage, merged);
 
     const fs::path dst(original_path);
     const fs::path tmpDir = dst.parent_path() /
