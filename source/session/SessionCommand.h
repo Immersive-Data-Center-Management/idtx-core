@@ -129,6 +129,36 @@ struct CreatePrimCommand
 };
 
 /**
+ * @brief Change the active state of an existing prim: a soft delete
+ *        (@c active == false) or its undo (@c active == true).
+ *
+ * The consumer validates the prim (it must exist and be defined only in the
+ * stage's local layers — the root layer and/or this session's own layer — not
+ * introduced across a reference/payload or defined in a sublayer), authors the
+ * `active` flag into the session layer, broadcasts a SetPrimActiveBroadcast to
+ * every client (including @c origin) and sends @c origin an Ack carrying
+ * @c request_id. Deactivation prunes the prim and its subtree from the composed
+ * stage; the prim is physically removed from the file only on commit. The
+ * members are plain values, so the command is trivially nothrow-movable as the
+ * mailbox requires.
+ */
+struct SetPrimActiveCommand
+{
+    std::string  prim_path;
+    bool         active{false};
+
+    // Connection that sent the request; it receives the Ack and, like every
+    // other client, the broadcast.
+    ConnectionId origin{};
+
+    // Client-assigned id echoed back in the Ack (0 if the client sent none).
+    std::uint64_t request_id{};
+
+    std::chrono::steady_clock::time_point received_at{
+        std::chrono::steady_clock::now()};
+};
+
+/**
  * @brief Commit the session's overrides into the original USD file.
  *
  * The submitter waits on the future obtained from @c result.
@@ -184,6 +214,7 @@ using SessionCommand = std::variant<
     TransformCommand,
     JoinCommand,
     CreatePrimCommand,
+    SetPrimActiveCommand,
     CommitCommand,
     ReloadCommand,
     FlushCommand,

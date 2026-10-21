@@ -6,8 +6,12 @@
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/base/tf/type.h>
+#include <pxr/base/vt/value.h>
+#include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/usd/prim.h>
+#include <pxr/usd/usd/primDefinition.h>
 #include <pxr/usd/usd/schemaRegistry.h>
 #include <pxr/usd/usdGeom/capsule.h>
 #include <pxr/usd/usdGeom/cone.h>
@@ -15,6 +19,7 @@
 #include <pxr/usd/usdGeom/cylinder.h>
 #include <pxr/usd/usdGeom/gprim.h>
 #include <pxr/usd/usdGeom/sphere.h>
+#include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xform.h>
 
 namespace idtx
@@ -116,6 +121,29 @@ bool AuthorPrim(const pxr::UsdStageRefPtr& stage,
     return static_cast<bool>(stage->DefinePrim(path, type_name));
 }
 
+// True if every opinion contributing to @p prim lives on the stage's local
+// layers (its root layer or this session's layer) and nowhere else. A prim
+// introduced across a reference or payload, or defined in a sublayer, has at
+// least one contributing spec on a foreign layer and so is NOT locally
+// deletable: its definition cannot be masked by a session-layer `active=false`
+// in a way we can later fold into the committed root file. Covers both a
+// root-authored prim (spec on the root layer, plus our session overrides) and
+// a prim created earlier this session (spec only on the session layer).
+bool IsLocallyDeletable(const pxr::UsdPrim& prim,
+                        const pxr::SdfLayerHandle& root_layer,
+                        const pxr::SdfLayerHandle& session_layer)
+{
+    const pxr::SdfPrimSpecHandleVector stack = prim.GetPrimStack();
+    if (stack.empty()) return false;
+    for (const pxr::SdfPrimSpecHandle& spec : stack)
+    {
+        if (!spec) continue;
+        const pxr::SdfLayerHandle layer = spec->GetLayer();
+        if (layer != root_layer && layer != session_layer) return false;
+    }
+    return true;
+}
+
 } // namespace
 
 idtxcore::PrimType PrimDispatcher::TypeFromName(const std::string& type_name)
@@ -215,6 +243,18 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
         return false;
     }
 
+    // GetPrimAtPath returns inactive prims too, so an explicit check is needed:
+    // a prim that was soft-deleted (deactivated) must not accept new children,
+    // as the whole subtree is pruned from composition. The pseudo-root is
+    // always active, so parenting under "/" is unaffected.
+    if (!parent_prim.IsActive())
+    {
+        IDTX_LOG(IDTX_WARN,
+                 "CreatePrimRequest parent '{}' is inactive (deleted); ignoring.",
+                 parent_path);
+        return false;
+    }
+
     // Gprims may not be nested under another gprim. Xform has no such rule and
     // may be parented under any valid prim, so it skips this check.
     if (IsGprimType(type) && HasGprimAncestor(parent_prim))
@@ -250,6 +290,135 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
         IDTX_LOG(IDTX_ERROR, "Exception while creating {} under '{}': {}",
                  base_name.GetString(), parent_path, e.what());
         return false;
+    }
+}
+
+PrimDispatcher::SetActiveStatus PrimDispatcher::SetActive(const pxr::UsdStageRefPtr& stage,
+                                                          const std::string& prim_path,
+                                                          bool active)
+{
+    if (!stage)
+    {
+        IDTX_LOG(IDTX_ERROR, "PrimDispatcher::SetActive called with null stage.");
+        return SetActiveStatus::Failed;
+    }
+
+    if (prim_path.empty() || !pxr::SdfPath::IsValidPathString(prim_path))
+    {
+        IDTX_LOG(IDTX_WARN, "SetPrimActiveRequest with invalid prim_path '{}'.", prim_path);
+        return SetActiveStatus::InvalidPath;
+    }
+
+    const pxr::SdfPath path(prim_path);
+    if (!path.IsAbsolutePath() || !path.IsPrimPath())
+    {
+        IDTX_LOG(IDTX_WARN, "SetPrimActiveRequest prim_path '{}' is not a prim path.", prim_path);
+        return SetActiveStatus::InvalidPath;
+    }
+
+    // GetPrimAtPath returns inactive prims too, so this also finds a prim that
+    // was already soft-deleted (which is how undo and the idempotency check
+    // below work).
+    const pxr::UsdPrim prim = stage->GetPrimAtPath(path);
+    if (!prim || !prim.IsDefined())
+    {
+        IDTX_LOG(IDTX_WARN, "SetPrimActiveRequest prim '{}' not found on stage; ignoring.",
+                 prim_path);
+        return SetActiveStatus::NotFound;
+    }
+
+    if (prim.IsPseudoRoot())
+    {
+        IDTX_LOG(IDTX_WARN, "SetPrimActiveRequest targets the pseudo-root; ignoring.");
+        return SetActiveStatus::NotDeletable;
+    }
+
+    if (prim.IsActive() == active)
+    {
+        IDTX_LOG(IDTX_DEBUG, "SetPrimActiveRequest for '{}' is a no-op (already active={}).",
+                 prim_path, active);
+        return SetActiveStatus::AlreadyInState;
+    }
+
+    // Deleting (active=false) requires the prim to be locally deletable;
+    // reactivating (undo) only requires that the prim exists, which it does.
+    if (!active)
+    {
+        if (!IsLocallyDeletable(prim, stage->GetRootLayer(), stage->GetSessionLayer()))
+        {
+            IDTX_LOG(IDTX_WARN,
+                     "SetPrimActiveRequest cannot delete '{}': it is defined in a sublayer or "
+                     "introduced across a reference/payload. Ignoring.",
+                     prim_path);
+            return SetActiveStatus::NotDeletable;
+        }
+    }
+
+    try
+    {
+        if (!prim.SetActive(active))
+        {
+            IDTX_LOG(IDTX_ERROR, "Failed to author active={} on '{}'.", active, prim_path);
+            return SetActiveStatus::Failed;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        IDTX_LOG(IDTX_ERROR, "Exception while setting active on '{}': {}", prim_path, e.what());
+        return SetActiveStatus::Failed;
+    }
+
+    return SetActiveStatus::Ok;
+}
+
+void PrimDispatcher::ReadSchemaDefaults(idtxcore::PrimType type, CreatedPrim& out)
+{
+    const pxr::TfType t = UsdSchemaType(type);
+    if (t.IsUnknown()) return;
+
+    const pxr::TfToken type_name = pxr::UsdSchemaRegistry::GetSchemaTypeName(t);
+    const pxr::UsdPrimDefinition* def =
+        pxr::UsdSchemaRegistry::GetInstance().FindConcretePrimDefinition(type_name);
+    if (!def) return;
+
+    const auto get_double = [&](const pxr::TfToken& name, double& value) -> bool
+    {
+        pxr::VtValue v;
+        if (def->GetAttributeFallbackValue(name, &v) && v.IsHolding<double>())
+        {
+            value = v.UncheckedGet<double>();
+            return true;
+        }
+        return false;
+    };
+
+    switch (type)
+    {
+        case idtxcore::PRIM_TYPE_CUBE:
+            out.has_size = get_double(pxr::UsdGeomTokens->size, out.size);
+            break;
+        case idtxcore::PRIM_TYPE_SPHERE:
+            out.has_radius = get_double(pxr::UsdGeomTokens->radius, out.radius);
+            break;
+        case idtxcore::PRIM_TYPE_CONE:
+        case idtxcore::PRIM_TYPE_CYLINDER:
+        case idtxcore::PRIM_TYPE_CAPSULE:
+        {
+            out.has_height = get_double(pxr::UsdGeomTokens->height, out.height);
+            out.has_radius = get_double(pxr::UsdGeomTokens->radius, out.radius);
+            pxr::VtValue axis;
+            if (def->GetAttributeFallbackValue(pxr::UsdGeomTokens->axis, &axis)
+                && axis.IsHolding<pxr::TfToken>())
+            {
+                out.axis = axis.UncheckedGet<pxr::TfToken>().GetString();
+                out.has_axis = true;
+            }
+            break;
+        }
+        case idtxcore::PRIM_TYPE_XFORM:
+        case idtxcore::PRIM_TYPE_UNSPECIFIED:
+        default:
+            break;
     }
 }
 

@@ -45,3 +45,30 @@ message CreatePrimBroadcast {
   optional double radius = 6;
   optional string axis = 7;
 }
+
+// Client -> server. Ask the server to change the active state of an existing
+// prim. @c active == false is a soft delete: the server authors `active=false`
+// into the session layer, which prunes the prim and its subtree from the
+// composed stage (and so from imaging). @c active == true undoes that. USD
+// composition is strictly additive at the prim level, so deactivation is the
+// only composition-safe way to "remove" a prim a weaker layer defines; the
+// prim is physically removed from the file only when the session is committed.
+//
+// The target must be an existing prim defined in the stage's root layer. A prim
+// introduced across a reference or payload, or defined only in a sublayer,
+// cannot be deleted (its definition lives in a foreign layer) and is rejected.
+message SetPrimActiveRequest {
+  string session_id = 1;
+  string prim_path = 2;
+  bool active = 3;
+}
+
+// Server -> all clients (including the originator) and replayed in the join
+// snapshot for late joiners. Announces that a prim's active state changed.
+// Clients mirror the flag on the prim in their own stage (authoring `active`,
+// not hard-removing), so delete and undo-delete are the same one-prim message
+// and neither needs a subtree snapshot: USD prunes/unprunes the subtree.
+message SetPrimActiveBroadcast {
+  string prim_path = 1;
+  bool active = 2;
+}

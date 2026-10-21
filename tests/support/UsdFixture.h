@@ -33,6 +33,19 @@ bool ReadTranslate(const std::filesystem::path& usd_file,
                    double& out_x, double& out_y, double& out_z);
 
 /**
+ * @brief Return true if a prim is present at @p prim_path in the USD file at
+ *        @p usd_file, counting inactive prims too (uses the all-prims
+ *        predicate). Always reads the file on disk, never a layer the
+ *        in-process server has open.
+ *
+ * Used to assert that a committed file has physically dropped a soft-deleted
+ * prim: after commit the prim should be gone entirely (returns false), as
+ * opposed to merely present-but-inactive.
+ */
+bool PrimExistsInFile(const std::filesystem::path& usd_file,
+                      const std::string& prim_path);
+
+/**
  * @brief Author a fresh `Xform "Root" { Xform "Cube" { xformOp:translate = (x,y,z) } }`
  *        scene as a raw USDA byte buffer.
  *

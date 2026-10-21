@@ -113,6 +113,17 @@ struct Session
     // current_origin.
     std::atomic<bool>                                 create_in_progress{false};
 
+    // Set by the set-prim-active command (soft delete / undo-delete) around
+    // the authoring call, and cleared once it returns. Like create_in_progress
+    // it makes the listener skip the resync that SetActive() fires, because the
+    // change is announced explicitly with a SetPrimActiveBroadcast. This is not
+    // merely an optimization: an inactive prim is still readable via
+    // GetPrimAtPath, so without this flag the generic transform path would read
+    // the (now inactive) prim and broadcast a misleading transform frame in
+    // place of the delete signal. Written by the consumer only; atomic for the
+    // same reason as current_origin.
+    std::atomic<bool>                                 set_active_in_progress{false};
+
     // Per-session state version. Incremented once for every stage change
     // observed by the listener and for every correction, and stamped on outgoing broadcasts, acks and
     // snapshots as BaseMessage.server_seq. Atomic for the same reason as
