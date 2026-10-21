@@ -1,4 +1,5 @@
 [![REUSE status](https://api.reuse.software/badge/github.com/Immersive-Data-Center-Management/idtx-core)](https://api.reuse.software/info/github.com/Immersive-Data-Center-Management/idtx-core)
+![OpenUSD 26.08](https://img.shields.io/badge/OpenUSD-26.08-brightgreen)
 
 # IDTX Core
 
@@ -21,8 +22,7 @@ After check-out of the project the local build is setup to run SCons python scri
 
 ### All Operating Systems
 
-- **Python3**, once installed use `pip` to install `scons`, `jinja2` and `pyside6`
-- **Godot4.5**, to be able to test the plugin within a Godot project. The Godot version need to match the version of the [C++ bindings](https://github.com/godotengine/godot-cpp) used as a dependency.
+- **Python3**, once installed use `pip` to install `scons`
 
 ### Windows
 
@@ -34,13 +34,27 @@ After check-out of the project the local build is setup to run SCons python scri
  - **C++ Buildtools** - The full Xcode IDE is required because OpenUSD's build script uses xcodebuild for codesigning,
  - **CMake** - use `brew install cmake` for example.
 
- Once all required software and tools are installed and configured the plugin can be build with the following command, executed at the root folder of this repository.
+ Once all required software and tools are installed and configured the server can be built with the following command, executed at the root folder of this repository.
 
 ```bash
 checked_out_repo_dir $>scons
 ```
 
 > Please be patient, as the first initial build will download and compile openUSD from source. Depending on the used hardware this may take up to 40 minutes or more.
+
+To enable the Hydra/HgiGL renderer for thumbnail generation (compiles `UsdImagingThumbnailGenerator` instead of the default `PlaceholderThumbnailGenerator`), pass `imaging=1`. This requires an OpenGL 4.5-capable driver at runtime:
+
+```bash
+checked_out_repo_dir $>scons imaging=1
+```
+
+On headless systems without EGL support, substitute OSMesa with `osmesa=1`:
+
+```bash
+checked_out_repo_dir $>scons imaging=1 osmesa=1
+```
+
+The Dockerfile `IMAGING` build argument (`--build-arg IMAGING=1`) enables the imaging variant for container builds.
 
 ## Running the backend
 
@@ -181,6 +195,8 @@ Clients join a session via a websocket at `/ws?sid=<session id>` and exchange bi
 - **Client rules.** Keep the highest `server_seq` received in any message (broadcast, `SnapshotComplete`, `Ack`) once the message has been applied, and send it as the base of every `TransformUpdate`. Do not send updates before `SnapshotComplete`. Show local changes immediately and apply every `TransformBroadcast` (snapshot, live, correction) in arrival order, which is the server order. Acks need no action: after `stale` the newer state has arrived or is on its way, after `apply_failed` or `queue_full` a correction follows, `session_closing` means the session is gone, and `invalid_base` indicates a client bug. With these rules the last message a client receives for a prim carries the server state of that prim. They rely on absolute (last-write-wins) transforms; relative edits would need client-side prediction.
 - **Join snapshot.** After the `Handshake`, a joining client receives one `TransformBroadcast` per prim with session overrides, followed by `SnapshotComplete`, all carrying the same `server_seq`. Live broadcasts can arrive before the snapshot; the snapshot frames supersede them.
 - **Commit.** `POST /api/v1/sessions/<id>/commit` is queued behind all previously received updates. It answers `200` with `{"committed": true}`, `409 nothing_to_commit`, or `503 unavailable` when the session is shutting down.
+- **CreatePrim.** A client sends a `CreatePrimRequest` specifying a `prim_path` and a `prim_type` (one of `Cube`, `Sphere`, `Cone`, `Cylinder`, `Capsule`, `Xform`). The server creates the prim in the session layer, sends an `Ack` to the originating client, and broadcasts a `CreatePrimBroadcast` (carrying the prim path and type) to all other clients.
+- **SetPrimActive.** A client sends a `SetPrimActiveRequest` with a `prim_path` and an `active` flag. Setting `active = false` is a non-destructive soft-delete; `true` restores it. The server applies the change to the session layer and broadcasts a `SetPrimActiveBroadcast` to all clients.
 
 | Variable               | Default          | Meaning                                                                                                                        |
 |------------------------|------------------|--------------------------------------------------------------------------------------------------------------------------------|
