@@ -282,6 +282,18 @@ public:
                                            ConnectionId connection_id);
 
     /**
+     * @brief Queue a snapshot a client asked for with SnapshotRequest, for
+     *        example after rebuilding its stage on LayerReloaded.
+     *
+     * Same snapshot as on join, in the session's command order; its
+     * SnapshotComplete echoes @p request_id. Never blocks. When not accepted,
+     * nothing is sent; the caller reports the failure.
+     */
+    SubmitStatus SubmitSnapshotRequestCommand(const std::string& session_id,
+                                              ConnectionId connection_id,
+                                              std::uint64_t request_id);
+
+    /**
      * @brief Queue a built-in primitive creation requested by a client.
      *
      * Never blocks. When accepted, the consumer authors a new gprim of @p type
@@ -398,6 +410,14 @@ public:
 
     const idtx::utils::UsdFileLocator& GetLocator() const noexcept { return m_locator_; }
 
+    /// Server-relative URI clients download @p usd_file (uploads-relative)
+    /// from. Shared by the Handshake and LayerReloaded so clients can match
+    /// the two.
+    static std::string DownloadUri(const std::string& usd_file)
+    {
+        return std::string("/api/v1/download/") + usd_file;
+    }
+
     /**
      * @brief Destroy every session that has had zero connected clients for at
      *        least the configured idle timeout, and return how many were
@@ -427,7 +447,7 @@ private:
     void ProcessCommand(Session& session, SessionCommand&& command);
 
     void HandleCommand(Session& session, TransformCommand& command);
-    void HandleCommand(Session& session, JoinCommand& command);
+    void HandleCommand(Session& session, SnapshotCommand& command);
     void HandleCommand(Session& session, CreatePrimCommand& command);
     void HandleCommand(Session& session, SetPrimActiveCommand& command);
     void HandleCommand(Session& session, PayloadCommand& command);
@@ -442,9 +462,18 @@ private:
     CommitResult CommitOverrides(Session& session);
 
     /// Layer thread: reload @p layer with SharedLayers() held exclusively,
-    /// pausing every session that uses it for the duration. @p label names
-    /// the file in log messages. Returns true if the layer changed.
-    bool ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer, const std::string& label);
+    /// pausing every session that uses it for the duration. @p usd_file is
+    /// the layer's uploads-relative path. If the layer changed, every paused
+    /// session drops its specs of prims the reload removed and its clients
+    /// are told to re-fetch the file (AnnounceLayerReloaded()). Returns true
+    /// if the layer changed.
+    bool ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer, const std::string& usd_file);
+
+    /// Send LayerReloaded for @p usd_file to every client of @p session. A
+    /// client re-fetches the file, rebuilds its stage and then asks for the
+    /// session's edits with SnapshotRequest. Called by the layer thread while
+    /// the session is paused.
+    void AnnounceLayerReloaded(Session& session, const std::string& usd_file);
 
     /// Every session, live or being torn down, whose used_layers contain
     /// @p layer. The caller holds SharedLayers() exclusively.

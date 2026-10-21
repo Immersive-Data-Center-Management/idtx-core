@@ -4,9 +4,11 @@
 // on the same file and a session that reaches the file through a payload are
 // reloaded while their clients stream updates, a teardown's auto-commit
 // reloads the file for the other sessions, a replacing upload waits for the
-// file-write slot, and a session's used layers follow a soft delete. A
-// listener that runs for a session that was not paused logs "does not own
-// its stage"; those tests assert it never happens.
+// file-write slot, a session's used layers follow a soft delete, and a
+// committed delete makes every client using the file re-fetch it and ask for
+// a snapshot, while the other sessions' edits of the deleted prim are
+// dropped. A listener that runs for a session that was not paused logs "does
+// not own its stage"; those tests assert it never happens.
 
 #include "thirdparty/doctest/doctest.h"
 
@@ -99,7 +101,8 @@ void WriteFile(const fs::path& path, const std::string& text)
     out << text;
 }
 
-/// asset.usda: /Box, which the scene pulls in through a payload, and /Other,
+/// asset.usda: /Box, which the scene pulls in through a payload (with its
+/// child /Box/Inner, at /Root/Group/Asset/Inner in the scene), and /Other,
 /// which only clients of the asset's own sessions edit.
 /// scene.usda: /Root/Group/Asset carries the payload; /Root and /Root/Group
 /// are local, so /Root/Group can be soft-deleted.
@@ -109,7 +112,11 @@ void WriteSceneFiles(const TestServer& server)
               "#usda 1.0\n(\n    defaultPrim = \"Box\"\n)\n\n"
               "def Xform \"Box\"\n{\n"
               "    double3 xformOp:translate = (0, 0, 0)\n"
-              "    uniform token[] xformOpOrder = [\"xformOp:translate\"]\n"
+              "    uniform token[] xformOpOrder = [\"xformOp:translate\"]\n\n"
+              "    def Xform \"Inner\"\n    {\n"
+              "        double3 xformOp:translate = (0, 0, 0)\n"
+              "        uniform token[] xformOpOrder = [\"xformOp:translate\"]\n"
+              "    }\n"
               "}\n\n"
               "def Xform \"Other\"\n{\n"
               "    double3 xformOp:translate = (0, 0, 0)\n"
@@ -143,6 +150,42 @@ std::string CreateSession(const TestServer& server,
 bool IsAck(const idtxcore::BaseMessage& m)
 {
     return m.message_case() == idtxcore::BaseMessage::kAck;
+}
+
+bool IsSnapshotComplete(const idtxcore::BaseMessage& m)
+{
+    return m.message_case() == idtxcore::BaseMessage::kSnapshotComplete;
+}
+
+bool IsLayerReloadedOf(const idtxcore::BaseMessage& m, const std::string& usd_path)
+{
+    return m.message_case() == idtxcore::BaseMessage::kLayerReloaded
+        && m.layer_reloaded().usd_path() == usd_path;
+}
+
+/// Read until the SnapshotComplete with @p request_id (0 after a join),
+/// keeping the transform frames before it.
+std::optional<idtxcore::BaseMessage> CollectSnapshot(WsTestClient& ws,
+                                                     std::vector<idtxcore::BaseMessage>& frames,
+                                                     std::uint64_t request_id = 0)
+{
+    return idtx::tests::WaitForMessage(
+        ws, std::chrono::milliseconds{10000},
+        [&](const idtxcore::BaseMessage& m) {
+            if (m.message_case() == idtxcore::BaseMessage::kXformBroadcast) frames.push_back(m);
+            return IsSnapshotComplete(m) && m.request_id() == request_id;
+        });
+}
+
+std::string BuildSnapshotRequest(const std::string& sid, std::uint64_t request_id)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(sid);
+    msg.set_request_id(request_id);
+    msg.mutable_snapshot_request();
+    std::string out;
+    msg.SerializeToString(&out);
+    return out;
 }
 
 bool IsBroadcastOf(const idtxcore::BaseMessage& m, const std::string& prim_path, double x)
@@ -516,4 +559,88 @@ TEST_CASE("shared layer: a replacing upload waits for the file-write slot a comm
     CHECK(replacing.get() == 201);
     REQUIRE(idtx::tests::ReadTranslate(cube, "/Root/Cube", x, y, z));
     CHECK(x == doctest::Approx(3.0));
+}
+
+TEST_CASE("shared layer: a committed delete makes every client using the file reload it, "
+          "and drops other sessions' edits of the deleted prim")
+{
+    CaptureLogger capture(kNotOwnedMessage);
+    {
+        TestServer server;
+        server.WaitReady();
+        WriteSceneFiles(server);
+        constexpr const char* kDeletedInScene = "/Root/Group/Asset/Inner";
+
+        const std::string deleter   = CreateSession(server, "asset.usda", "collaborative_edit");
+        const std::string scene_sid = CreateSession(server, "scene.usda", "collaborative_edit");
+
+        WsTestClient deleter_ws;
+        WsTestClient scene_ws;
+        std::uint64_t deleter_seq = Join(deleter_ws, server, deleter);
+        std::uint64_t scene_seq   = Join(scene_ws, server, scene_sid);
+
+        // The scene session moves the prim it reaches through the payload, so
+        // its own layer holds an edit of it.
+        scene_ws.SendBinary(idtx::tests::BuildTransformUpdate(
+            scene_sid, "scene.usda", kDeletedInScene, 5.0, 0.0, 0.0, 1, scene_seq));
+        auto ack = WaitForAck(scene_ws, 1, scene_seq);
+        REQUIRE(ack.has_value());
+        REQUIRE(ack->ack().ok());
+
+        // The asset's own session deletes the prim and commits, which removes
+        // it from asset.usda.
+        deleter_ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(deleter, "/Box/Inner", false, 1));
+        ack = WaitForAck(deleter_ws, 1, deleter_seq);
+        REQUIRE(ack.has_value());
+        REQUIRE(ack->ack().ok());
+
+        HttpTestClient http(std::chrono::milliseconds{60000});
+        REQUIRE(http.PostJson(server.base_http_url() + "/api/v1/sessions/" + deleter + "/commit",
+                              "{}").status == 200);
+
+        // The scene's client is told to re-fetch asset.usda. Once it has
+        // rebuilt its stage it asks for the session's state, and the snapshot
+        // it gets no longer mentions the deleted prim.
+        const auto reloaded = idtx::tests::WaitForMessage(
+            scene_ws, std::chrono::milliseconds{10000},
+            [](const idtxcore::BaseMessage& m) { return IsLayerReloadedOf(m, "asset.usda"); });
+        REQUIRE(reloaded.has_value());
+        CHECK(reloaded->layer_reloaded().usd_uri() == "/api/v1/download/asset.usda");
+
+        constexpr std::uint64_t kSnapshotRequestId = 77;
+        scene_ws.SendBinary(BuildSnapshotRequest(scene_sid, kSnapshotRequestId));
+        std::vector<idtxcore::BaseMessage> snapshot;
+        const auto complete = CollectSnapshot(scene_ws, snapshot, kSnapshotRequestId);
+        REQUIRE(complete.has_value());
+        CHECK(complete->server_seq() >= reloaded->server_seq());
+        for (const auto& frame : snapshot)
+            CHECK(frame.xform_broadcast().update().prim_path() != kDeletedInScene);
+
+        // The deleting session uses the file as its root, so its client is
+        // told as well.
+        CHECK(idtx::tests::WaitForMessage(
+                  deleter_ws, std::chrono::milliseconds{10000},
+                  [](const idtxcore::BaseMessage& m) { return IsLayerReloadedOf(m, "asset.usda"); })
+                  .has_value());
+
+        // The scene session's own edit of the deleted prim is gone ...
+        const auto session = server.session_manager().Get(scene_sid);
+        REQUIRE(session);
+        {
+            std::shared_lock layers(idtx::concurrency::SharedLayers());
+            REQUIRE(session->stage);
+            CHECK_FALSE(session->stage->GetSessionLayer()->GetPrimAtPath(
+                pxr::SdfPath(kDeletedInScene)));
+        }
+
+        // ... so a client joining it now gets no frame for that prim either.
+        WsTestClient late;
+        auto conn = late.Connect("127.0.0.1", server.port(), "/ws?sid=" + scene_sid);
+        REQUIRE(conn.handshake_ok);
+        std::vector<idtxcore::BaseMessage> late_snapshot;
+        REQUIRE(CollectSnapshot(late, late_snapshot).has_value());
+        for (const auto& frame : late_snapshot)
+            CHECK(frame.xform_broadcast().update().prim_path() != kDeletedInScene);
+    }
+    CHECK(capture.Matches() == 0);
 }

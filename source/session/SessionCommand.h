@@ -98,15 +98,20 @@ struct TransformCommand
 };
 
 /**
- * @brief Send the current session state to a newly joined connection.
+ * @brief Send the current session state to one connection: when it joins,
+ *        and when it asks for it with a SnapshotRequest.
  *
  * Because it runs on the consumer, the snapshot reflects exactly the state
  * after every command queued before it and before every command queued after
  * it.
  */
-struct JoinCommand
+struct SnapshotCommand
 {
     ConnectionId connection{};
+
+    // Echoed in the SnapshotComplete that ends the snapshot, so a client that
+    // asked for it can tell it apart from any other. 0 for a join.
+    std::uint64_t request_id{};
 };
 
 /**
@@ -254,7 +259,7 @@ struct CorrectionCommand
 
 using SessionCommand = std::variant<
     TransformCommand,
-    JoinCommand,
+    SnapshotCommand,
     CreatePrimCommand,
     SetPrimActiveCommand,
     PayloadCommand,
