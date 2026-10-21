@@ -462,12 +462,14 @@ private:
     CommitResult CommitOverrides(Session& session);
 
     /// Layer thread: reload @p layer with SharedLayers() held exclusively,
-    /// pausing every session that uses it for the duration. @p usd_file is
-    /// the layer's uploads-relative path. If the layer changed, every paused
+    /// pausing every session that uses it for the duration. The file is named
+    /// by its canonical uploads-relative path, derived from the layer's real
+    /// path (UsdFileLocator::ToUploadsRelative()); @p requested_usd_file is
+    /// only used if that fails. If the layer changed, every paused
     /// session drops its specs of prims the reload removed and its clients
     /// are told to re-fetch the file (AnnounceLayerReloaded()). Returns true
     /// if the layer changed.
-    bool ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer, const std::string& usd_file);
+    bool ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer, const std::string& requested_usd_file);
 
     /// Send LayerReloaded for @p usd_file to every client of @p session. A
     /// client re-fetches the file, rebuilds its stage and then asks for the

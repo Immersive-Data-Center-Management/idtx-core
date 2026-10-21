@@ -7,8 +7,9 @@
 // file-write slot, a session's used layers follow a soft delete, and a
 // committed delete makes every client using the file re-fetch it and ask for
 // a snapshot, while the other sessions' edits of the deleted prim are
-// dropped. A listener that runs for a session that was not paused logs "does
-// not own its stage"; those tests assert it never happens.
+// dropped. Sessions and LayerReloaded name a file canonically, whatever
+// spelling a request used. A listener that runs for a session that was not
+// paused logs "does not own its stage"; those tests assert it never happens.
 
 #include "thirdparty/doctest/doctest.h"
 
@@ -643,4 +644,82 @@ TEST_CASE("shared layer: a committed delete makes every client using the file re
             CHECK(frame.xform_broadcast().update().prim_path() != kDeletedInScene);
     }
     CHECK(capture.Matches() == 0);
+}
+
+TEST_CASE("shared layer: sessions and LayerReloaded name a file canonically, "
+          "whatever spelling the request used")
+{
+    TestServer server;
+    server.WaitReady();
+    WriteSceneFiles(server);
+    WriteFile(server.uploads_root() / "my asset.usda", idtx::tests::BuildCubeUsdaBytes(0.0, 0.0, 0.0));
+
+    HttpTestClient http(std::chrono::milliseconds{60000});
+    const auto create = [&](const std::string& usd_file)
+    {
+        const json req = {{"usd_file", usd_file}, {"mode", "collaborative_edit"}};
+        const auto r = http.PostJson(server.base_http_url() + "/api/v1/sessions", req.dump());
+        REQUIRE(r.status == 201);
+        return json::parse(r.text);
+    };
+
+    // The session stores its file under the canonical name.
+    const json dotted  = create("./asset.usda");
+    const json encoded = create("my%20asset.usda");
+    CHECK(dotted.value("usd_file", "") == "asset.usda");
+    CHECK(encoded.value("usd_file", "") == "my asset.usda");
+    const std::string dotted_sid  = dotted.value("session_id", "");
+    const std::string encoded_sid = encoded.value("session_id", "");
+
+    // So does the handshake.
+    WsTestClient dotted_ws;
+    {
+        auto conn = dotted_ws.Connect("127.0.0.1", server.port(), "/ws?sid=" + dotted_sid);
+        REQUIRE(conn.handshake_ok);
+        const auto hs = idtx::tests::WaitForMessage(
+            dotted_ws, std::chrono::milliseconds{5000},
+            [](const idtxcore::BaseMessage& m) {
+                return m.message_case() == idtxcore::BaseMessage::kHandshake;
+            });
+        REQUIRE(hs.has_value());
+        CHECK(hs->handshake().usd_path() == "asset.usda");
+        CHECK(hs->handshake().usd_uri() == "/api/v1/download/asset.usda");
+    }
+    std::vector<idtxcore::BaseMessage> ignored;
+    REQUIRE(CollectSnapshot(dotted_ws, ignored).has_value());
+
+    WsTestClient encoded_ws;
+    Join(encoded_ws, server, encoded_sid);
+
+    // A commit of the session created as "./asset.usda" announces "asset.usda".
+    std::uint64_t seq = 0;
+    dotted_ws.SendBinary(idtx::tests::BuildTransformUpdate(
+        dotted_sid, "asset.usda", "/Box", 3.0, 0.0, 0.0, 1, seq));
+    const auto ack = WaitForAck(dotted_ws, 1, seq);
+    REQUIRE(ack.has_value());
+    REQUIRE(ack->ack().ok());
+    REQUIRE(http.PostJson(server.base_http_url() + "/api/v1/sessions/" + dotted_sid + "/commit",
+                          "{}").status == 200);
+    const auto from_commit = idtx::tests::WaitForMessage(
+        dotted_ws, std::chrono::milliseconds{10000},
+        [](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kLayerReloaded;
+        });
+    REQUIRE(from_commit.has_value());
+    CHECK(from_commit->layer_reloaded().usd_path() == "asset.usda");
+    CHECK(from_commit->layer_reloaded().usd_uri() == "/api/v1/download/asset.usda");
+
+    // An upload replacing "my asset.usda" announces the decoded name.
+    const auto upload = http.UploadMultipart(server.base_http_url() + "/api/v1/upload",
+                                             idtx::tests::BuildCubeUsdaBytes(4.0, 0.0, 0.0),
+                                             "my asset.usda", /*target_dir=*/"", /*overwrite=*/true);
+    REQUIRE(upload.status == 201);
+    const auto from_upload = idtx::tests::WaitForMessage(
+        encoded_ws, std::chrono::milliseconds{10000},
+        [](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kLayerReloaded;
+        });
+    REQUIRE(from_upload.has_value());
+    CHECK(from_upload->layer_reloaded().usd_path() == "my asset.usda");
+    CHECK(from_upload->layer_reloaded().usd_uri() == "/api/v1/download/my asset.usda");
 }
