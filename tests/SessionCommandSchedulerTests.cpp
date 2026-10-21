@@ -1,6 +1,6 @@
 // tests/SessionCommandSchedulerTests.cpp
 //
-// Exercises SessionCommandScheduler with JoinCommand values as tagged
+// Exercises SessionCommandScheduler with SnapshotCommand values as tagged
 // payloads: the connection field carries a test-chosen number, so the handler
 // can record which command ran and in what order. No server is involved.
 
@@ -22,7 +22,7 @@
 
 using idtx::concurrency::WorkerExecutor;
 using idtx::session::CommandAdmissionStatus;
-using idtx::session::JoinCommand;
+using idtx::session::SnapshotCommand;
 using idtx::session::SessionCommand;
 using idtx::session::SessionCommandScheduler;
 
@@ -31,12 +31,12 @@ namespace
 
 SessionCommand Tagged(std::uint64_t tag)
 {
-    return JoinCommand{tag};
+    return SnapshotCommand{tag};
 }
 
 std::uint64_t TagOf(const SessionCommand& command)
 {
-    return std::get<JoinCommand>(command).connection;
+    return std::get<SnapshotCommand>(command).connection;
 }
 
 // Records the tags a scheduler's handler saw, in execution order, and flags

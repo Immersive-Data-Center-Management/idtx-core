@@ -236,6 +236,74 @@ SessionManager::SubmitStatus ToSubmitStatus(const CommandAdmissionStatus status)
     }
 }
 
+/// True if the prim at @p path, which the session's own layer has specs for,
+/// is no longer part of @p stage because the file defining it no longer does,
+/// for example after another session committed its deletion. Only the
+/// session's own `over` is left then, or nothing at all. A prim merely pruned
+/// below an inactive (soft-deleted) ancestor is not removed: its specs must
+/// stay so that undoing the delete restores it.
+bool IsRemovedFromStage(const pxr::UsdStageRefPtr& stage, const pxr::SdfPath& path)
+{
+    if (!stage) return false;
+    if (const pxr::UsdPrim prim = stage->GetPrimAtPath(path)) return !prim.IsDefined();
+
+    // Not on the stage at all: removed, unless the nearest ancestor that is on
+    // the stage is inactive and prunes it.
+    for (pxr::SdfPath ancestor_path = path.GetParentPath();
+         !ancestor_path.IsEmpty() && ancestor_path != pxr::SdfPath::AbsoluteRootPath();
+         ancestor_path = ancestor_path.GetParentPath())
+    {
+        if (const pxr::UsdPrim ancestor = stage->GetPrimAtPath(ancestor_path))
+            return ancestor.IsActive();
+    }
+    return true;
+}
+
+/// Remove from @p session's own layer the specs of every prim a reload
+/// removed from its stage (see IsRemovedFromStage()), together with their
+/// subtrees. Returns how many prim specs were removed. Must run while the
+/// session's consumer is paused.
+std::size_t DropSpecsOfRemovedPrims(Session& session)
+{
+    if (!session.stage) return 0;
+    const pxr::SdfLayerHandle session_layer = session.stage->GetSessionLayer();
+    if (!session_layer) return 0;
+
+    std::vector<pxr::SdfPath> removed;
+    session_layer->Traverse(
+        pxr::SdfPath::AbsoluteRootPath(),
+        [&](const pxr::SdfPath& p)
+        {
+            if (p.IsPrimPath() && IsRemovedFromStage(session.stage, p)) removed.push_back(p);
+        });
+
+    // Ancestors first, so a removed prim's descendants go with its spec.
+    std::sort(removed.begin(), removed.end(),
+              [](const pxr::SdfPath& a, const pxr::SdfPath& b)
+              {
+                  return a.GetPathElementCount() < b.GetPathElementCount();
+              });
+
+    std::vector<pxr::SdfPath> dropped;
+    for (const pxr::SdfPath& path : removed)
+    {
+        const bool below_dropped = std::any_of(
+            dropped.begin(), dropped.end(),
+            [&](const pxr::SdfPath& d) { return path.HasPrefix(d); });
+        if (below_dropped) continue;
+
+        const pxr::SdfPrimSpecHandle spec = session_layer->GetPrimAtPath(path);
+        if (!spec) continue;
+        const pxr::SdfPath parent_path = path.GetParentPath();
+        const pxr::SdfPrimSpecHandle parent =
+            parent_path == pxr::SdfPath::AbsoluteRootPath()
+                ? session_layer->GetPseudoRoot()
+                : session_layer->GetPrimAtPath(parent_path);
+        if (parent && parent->RemoveNameChild(spec)) dropped.push_back(path);
+    }
+    return dropped.size();
+}
+
 } // namespace
 
 SessionManager::SessionManager(idtx::utils::UsdFileLocator file_locator,
@@ -749,7 +817,7 @@ void SessionManager::RefreshUsedLayers(Session& session)
 }
 
 bool SessionManager::ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer,
-                                             const std::string& label)
+                                             const std::string& usd_file)
 {
     if (!layer) return false;
 
@@ -784,7 +852,34 @@ bool SessionManager::ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer,
     }
     catch (const std::exception& e)
     {
-        IDTX_LOG(IDTX_ERROR, "SdfLayer::Reload threw for '{}': {}", label, e.what());
+        IDTX_LOG(IDTX_ERROR, "SdfLayer::Reload threw for '{}': {}", usd_file, e.what());
+    }
+
+    if (ok)
+    {
+        for (const auto& session : users)
+        {
+            // A session's own edits of a prim the file no longer has are
+            // dropped. Its notices belong to this reload, so they run under
+            // the same context.
+            try
+            {
+                AuthoringContext context;
+                context.reload = true;
+                context.paused = &paused;
+                const AuthoringScope authoring(context);
+                pxr::SdfChangeBlock block;
+                if (DropSpecsOfRemovedPrims(*session) > 0)
+                    session->dirty.store(true, std::memory_order_relaxed);
+            }
+            catch (const std::exception& e)
+            {
+                IDTX_LOG(IDTX_ERROR, "Session {}: dropping edits of prims removed by '{}' threw: {}",
+                         session->id, usd_file, e.what());
+            }
+
+            AnnounceLayerReloaded(*session, usd_file);
+        }
     }
 
     // The reload may have added or removed sublayers, references or payloads.
@@ -797,10 +892,35 @@ bool SessionManager::ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer,
     }
 
     if (ok)
-        IDTX_LOG(IDTX_INFO, "Reloaded layer '{}' ({} session(s) paused).", label, users.size());
+        IDTX_LOG(IDTX_INFO, "Reloaded layer '{}' ({} session(s) paused).", usd_file, users.size());
     else
-        IDTX_LOG(IDTX_DEBUG, "SdfLayer::Reload reported no change for '{}'.", label);
+        IDTX_LOG(IDTX_DEBUG, "SdfLayer::Reload reported no change for '{}'.", usd_file);
     return ok;
+}
+
+void SessionManager::AnnounceLayerReloaded(Session& session, const std::string& usd_file)
+{
+    // The session's version after the reload, including what its listener
+    // recorded for it. Nothing else advances it while the session is paused.
+    const std::uint64_t seq = session.server_seq.load();
+
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session.id);
+    msg.set_server_seq(seq);
+    auto* reloaded = msg.mutable_layer_reloaded();
+    reloaded->set_usd_path(usd_file);
+    reloaded->set_usd_uri(DownloadUri(usd_file));
+    std::string payload;
+    if (!msg.SerializeToString(&payload)) return;
+
+    // No snapshot is pushed: a client asks for one once it has rebuilt its
+    // stage, so the snapshot never arrives while it is still reloading.
+    std::shared_lock lk(session.clients_mutex);
+    for (const auto& [id, conn] : session.clients)
+    {
+        conn->send_binary(payload);
+        session.versions.RecordSent(id, seq);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -920,7 +1040,17 @@ SessionManager::SubmitStatus SessionManager::SubmitJoinSnapshotCommand(
 {
     auto session = Get(session_id);
     if (!session) return SubmitStatus::UnknownSession;
-    return Submit(*session, JoinCommand{connection_id});
+    return Submit(*session, SnapshotCommand{connection_id, /*request_id=*/0});
+}
+
+SessionManager::SubmitStatus SessionManager::SubmitSnapshotRequestCommand(
+    const std::string& session_id,
+    ConnectionId connection_id,
+    std::uint64_t request_id)
+{
+    auto session = Get(session_id);
+    if (!session) return SubmitStatus::UnknownSession;
+    return Submit(*session, SnapshotCommand{connection_id, request_id});
 }
 
 SessionManager::SubmitStatus SessionManager::SubmitCreatePrimCommand(
@@ -1276,7 +1406,7 @@ void SessionManager::HandleCommand(Session& session, PayloadCommand& command)
     SendAck(session, command.origin, command.request_id, ok, "not_implemented");
 }
 
-void SessionManager::HandleCommand(Session& session, JoinCommand& command)
+void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
 {
     if (!session.stage) return;
 
@@ -1305,6 +1435,14 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
                 if (p.IsPrimPath())          prim_paths.insert(p);
                 else if (p.IsPropertyPath()) prim_paths.insert(p.GetPrimPath());
             });
+
+        // A prim the file no longer defines has no place in the snapshot: the
+        // client's copy of the file does not have it either. A reload drops
+        // such specs already; this covers a sidecar resumed from disk.
+        std::erase_if(prim_paths, [&session](const pxr::SdfPath& p)
+                      {
+                          return IsRemovedFromStage(session.stage, p);
+                      });
 
         // Late joiners must re-create prims authored into the session layer
         // (they are absent from the on-disk root file a joiner fetches via
@@ -1378,6 +1516,7 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
     idtxcore::BaseMessage done;
     done.set_session_id(session.id);
     done.set_server_seq(seq);
+    done.set_request_id(command.request_id); // 0 after a join
     done.mutable_snapshot_complete();
     std::string done_payload;
     if (done.SerializeToString(&done_payload)) frames.push_back(std::move(done_payload));
@@ -1390,8 +1529,8 @@ void SessionManager::HandleCommand(Session& session, JoinCommand& command)
         session.versions.RecordSent(command.connection, seq);
     }
 
-    IDTX_LOG(IDTX_INFO, "Sent join snapshot ({} prim frame(s)) to a client of session {}.",
-             frames.size() - 1, session.id);
+    IDTX_LOG(IDTX_INFO, "Sent {} snapshot ({} prim frame(s)) to a client of session {}.",
+             command.request_id != 0 ? "requested" : "join", frames.size() - 1, session.id);
 }
 
 void SessionManager::HandleCommand(Session& session, CommitCommand& command)
