@@ -542,6 +542,16 @@ std::shared_ptr<Session> SessionManager::Create(const std::string& usd_file,
         return nullptr;
     }
 
+    // The session names its file in one spelling, whatever the request used
+    // ("./a.usda", "my%20a.usda"), so the handshake, the session description,
+    // LayerReloaded and every client agree on it.
+    std::string canonical_usd_file;
+    if (m_locator_.ToUploadsRelative(resolved, canonical_usd_file)
+        != idtx::utils::UsdFileLocator::Status::Ok)
+    {
+        canonical_usd_file = usd_file;
+    }
+
     const std::string session_id  = idtx::utils::GenerateUuidV4();
     const std::filesystem::path sidecar_path =
         m_sessions_dir_ / (session_id + ".usda");
@@ -603,7 +613,7 @@ std::shared_ptr<Session> SessionManager::Create(const std::string& usd_file,
 
     auto session               = std::make_shared<Session>();
     session->id                = session_id;
-    session->usd_file          = usd_file;
+    session->usd_file          = canonical_usd_file;
     session->usd_file_absolute = resolved;
     session->stage             = stage;
     session->mode              = mode;
@@ -632,7 +642,7 @@ std::shared_ptr<Session> SessionManager::Create(const std::string& usd_file,
 
     out_status = CreateStatus::Ok;
     IDTX_LOG(IDTX_INFO, "Created session {} for '{}'{}.",
-             session->id, usd_file, resuming ? " (resumed from sidecar)" : "");
+             session->id, canonical_usd_file, resuming ? " (resumed from sidecar)" : "");
     return session;
 }
 
@@ -817,9 +827,18 @@ void SessionManager::RefreshUsedLayers(Session& session)
 }
 
 bool SessionManager::ReloadLayerPausingUsers(const pxr::SdfLayerHandle& layer,
-                                             const std::string& usd_file)
+                                             const std::string& requested_usd_file)
 {
     if (!layer) return false;
+
+    // Named after the file itself, not after how the caller spelled it, so
+    // LayerReloaded matches what every client resolved.
+    std::string usd_file;
+    if (m_locator_.ToUploadsRelative(layer->GetRealPath(), usd_file)
+        != idtx::utils::UsdFileLocator::Status::Ok)
+    {
+        usd_file = requested_usd_file;
+    }
 
     // Exclusive: no stage is being created and no session is adding or
     // dropping layers, so the used-layer lists read below are complete.
