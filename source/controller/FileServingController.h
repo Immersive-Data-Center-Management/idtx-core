@@ -55,10 +55,10 @@ public:
      *                        related endpoints degrade gracefully.
      * @param session_manager Optional session manager. When provided, an
      *                        upload that replaces an existing file on disk
-     *                        will trigger a root-layer reload on every live
-     *                        session that holds the same USD file
+     *                        reloads the file's in-memory layer, which every
+     *                        session whose stage uses it observes
      *                        (see @c UploadFile and
-     *                        @c idtx::session::SessionManager::SubmitReloadSessionsCommand).
+     *                        @c idtx::session::SessionManager::ReloadSharedLayer).
      *                        Held as a @c weak_ptr because the controller
      *                        must not extend the manager's lifetime.
      */

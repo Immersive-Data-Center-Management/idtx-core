@@ -41,9 +41,15 @@ enum class CommitStatus
     UnknownSession,
     NothingToCommit,
     WriteFailed,
-    // The commit could not be scheduled or did not complete in time (queue
-    // full, session closing, or timeout). Retrying later may succeed.
+    // The commit was not queued (queue full, session closing, or another
+    // commit or upload still writing). Nothing was written; retrying later
+    // may succeed.
     Unavailable,
+    // The commit is queued and still runs, but did not finish while the
+    // caller waited (for example because its reload waits for a thumbnail
+    // render). Its outcome is not reported to the caller; retrying is not
+    // needed.
+    Pending,
 };
 
 struct CommitResult
@@ -92,15 +98,20 @@ struct TransformCommand
 };
 
 /**
- * @brief Send the current session state to a newly joined connection.
+ * @brief Send the current session state to one connection: when it joins,
+ *        and when it asks for it with a SnapshotRequest.
  *
  * Because it runs on the consumer, the snapshot reflects exactly the state
  * after every command queued before it and before every command queued after
  * it.
  */
-struct JoinCommand
+struct SnapshotCommand
 {
     ConnectionId connection{};
+
+    // Echoed in the SnapshotComplete that ends the snapshot, so a client that
+    // asked for it can tell it apart from any other. 0 for a join.
+    std::uint64_t request_id{};
 };
 
 /**
@@ -141,6 +152,11 @@ struct CreatePrimCommand
  * stage; the prim is physically removed from the file only on commit. The
  * members are plain values, so the command is trivially nothrow-movable as the
  * mailbox requires.
+ *
+ * Pruning or restoring a subtree also drops or composes again every layer it
+ * references or payloads, so like PayloadCommand it runs holding
+ * idtx::concurrency::SharedLayers() shared and refreshes
+ * Session::used_layers.
  */
 struct SetPrimActiveCommand
 {
@@ -159,18 +175,49 @@ struct SetPrimActiveCommand
 };
 
 /**
+ * @brief Add or remove a payload arc on a prim (placeholder).
+ *
+ * Changes which layers the session's stage composes: adding loads the
+ * payload's file through the process-wide layer registry, possibly the same
+ * layer another stage uses or a reload is rewriting, and removing may drop
+ * the last reference to one. The consumer therefore runs it holding
+ * idtx::concurrency::SharedLayers() shared, deferring it while a reload is
+ * pending rather than blocking the worker, and refreshes
+ * Session::used_layers before releasing the lock.
+ *
+ * The authoring itself is not implemented yet; see
+ * SessionManager::HandleCommand(Session&, PayloadCommand&).
+ */
+struct PayloadCommand
+{
+    // Prim that carries (or receives) the payload arc.
+    std::string prim_path;
+
+    // Asset path of the payload's file, as the client sent it. Empty when
+    // removing.
+    std::string asset_path;
+
+    bool remove = false;
+
+    ConnectionId  origin{};
+    std::uint64_t request_id{};
+};
+
+/**
  * @brief Commit the session's overrides into the original USD file.
  *
- * The submitter waits on the future obtained from @c result.
+ * The consumer writes the file; the file's layer is then reloaded off the
+ * worker pool, and @c result is set once that reload is done. The submitter
+ * waits on the future obtained from @c result.
  */
 struct CommitCommand
 {
     std::promise<CommitResult> result;
-};
 
-/** @brief Reload the root layer from disk after the file changed. */
-struct ReloadCommand
-{
+    // Keeps the manager's single commit slot taken from submission until the
+    // reload of the written file has finished, wherever the commit ends:
+    // released when the last copy is destroyed.
+    std::shared_ptr<void> commit_slot;
 };
 
 /** @brief Save the session layer to its sidecar file if it is dirty. */
@@ -212,11 +259,11 @@ struct CorrectionCommand
 
 using SessionCommand = std::variant<
     TransformCommand,
-    JoinCommand,
+    SnapshotCommand,
     CreatePrimCommand,
     SetPrimActiveCommand,
+    PayloadCommand,
     CommitCommand,
-    ReloadCommand,
     FlushCommand,
     CorrectionCommand>;
 

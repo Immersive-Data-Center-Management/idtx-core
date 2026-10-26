@@ -17,6 +17,7 @@
 #include <pxr/base/vt/dictionary.h>
 #include <pxr/usd/sdf/layer.h>
 
+#include "concurrency/SharedLayerLock.h"
 #include "dto/ErrorResponse.h"
 #include "dto/UploadDto.h"
 #include "session/SessionManager.h"
@@ -146,6 +147,10 @@ crow::response FileServingController::FileExists(const std::string& filepath)
             return res;
         }
 
+        // The layer may be one a session's stage uses and a reload rewrites.
+        // Declared first so it outlives the layer handle.
+        std::shared_lock layers(idtx::concurrency::SharedLayers());
+
         pxr::SdfLayerRefPtr layer = pxr::SdfLayer::FindOrOpen(resolved.string());
         if (!layer)
         {
@@ -264,6 +269,28 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                     idtx::utils::UsdFileLocator::StatusToString(vstatus));
         }
 
+        // An upload that may replace an existing file takes the session
+        // manager's file-write slot, which commits hold while they write a
+        // file and until it is reloaded. So an upload and a commit never write
+        // the same file at once, and neither reloads or flattens the other's
+        // half-finished state. Taken before the existence check below, so
+        // that check and the replacement happen under it. Released when this
+        // handler returns, or, after a replacement, once the reload is done.
+        std::shared_ptr<void> write_slot;
+        if (overwrite)
+        {
+            if (auto sm = m_session_manager_.lock())
+            {
+                write_slot = sm->AcquireFileWriteSlot(
+                    idtx::session::SessionManager::kCommitTimeout);
+                if (!write_slot)
+                {
+                    return idtx::dto::make_error(503, "unavailable",
+                        "Another commit or upload is still writing; retry later.");
+                }
+            }
+        }
+
         // Overwrite check (before mkdir so we don't churn the filesystem for
         // rejected requests). We also remember whether the target existed
         // before the rename so we know, after the write succeeds, whether
@@ -330,10 +357,12 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                                          "Failed to finalise uploaded file: " + ec.message());
         }
 
-        // ---- Reload live sessions when this upload replaced an existing
-        // file. We only do this for real replacements (not brand-new files)
-        // because live sessions can only ever be bound to files that already
-        // existed at session-creation time. Errors here are logged but must
+        // ---- Reload the in-memory layer when this upload replaced an
+        // existing file, so every stage using it (sessions on this file and
+        // on files that reference it) sees the new content. Queued on the
+        // session manager's layer thread; does not block. We only do this
+        // for real replacements (not brand-new files) because no stage can
+        // have loaded a file that did not exist yet. Errors here are logged but must
         // not fail the HTTP response — the upload itself succeeded.
         if (target_existed_before && overwrite)
         {
@@ -341,19 +370,18 @@ crow::response FileServingController::UploadFile(const crow::request& req)
             {
                 try
                 {
-                    const std::size_t n = sm->SubmitReloadSessionsCommand(
-                        relative_path.generic_string());
-                    if (n > 0)
+                    if (sm->ReloadSharedLayer(relative_path.generic_string(),
+                                              std::move(write_slot)))
                     {
                         IDTX_LOG(IDTX_INFO,
-                                 "Upload replaced '{}'; triggered reload on {} live session(s).",
-                                 relative_path.generic_string(), n);
+                                 "Upload replaced '{}'; queued a reload of its layer.",
+                                 relative_path.generic_string());
                     }
                 }
                 catch (const std::exception& e)
                 {
                     IDTX_LOG(IDTX_ERROR,
-                             "SubmitReloadSessionsCommand failed for '{}': {}",
+                             "ReloadSharedLayer failed for '{}': {}",
                              relative_path.generic_string(), e.what());
                 }
             }

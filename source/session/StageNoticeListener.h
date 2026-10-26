@@ -11,10 +11,15 @@
  * reads the resolved transform back from the stage, and asks
  * SessionManager to broadcast it.
  *
- * Notices are delivered on the thread that authored the change, which is the
- * session's command consumer. Origin suppression uses Session::current_origin,
- * which the consumer sets while it applies a client's TransformUpdate; the
- * listener skips echoing the change back to that connection. Every notice
+ * Notices are delivered synchronously on the thread that changed a layer.
+ * For an edit that is the session's command consumer. For a reload of a
+ * layer the stage shares with other stages (the root file, or a file it
+ * sublayers, references or payloads) it is the manager's layer thread,
+ * which pauses this session for the duration. The listener therefore reads
+ * the sending thread's AuthoringContext: a reload takes the reload branch,
+ * a prim creation is skipped, and an edit's origin is only used when the edit
+ * belongs to this session, so the change is not echoed back to that
+ * connection. Every notice
  * that affects at least one prim advances Session::server_seq once, and all
  * broadcasts for that notice carry the new value. Every broadcast prim is
  * recorded in Session::versions with that value and the origin as writer.

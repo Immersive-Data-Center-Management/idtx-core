@@ -1,6 +1,6 @@
 // tests/SessionCommandSchedulerTests.cpp
 //
-// Exercises SessionCommandScheduler with JoinCommand values as tagged
+// Exercises SessionCommandScheduler with SnapshotCommand values as tagged
 // payloads: the connection field carries a test-chosen number, so the handler
 // can record which command ran and in what order. No server is involved.
 
@@ -22,7 +22,7 @@
 
 using idtx::concurrency::WorkerExecutor;
 using idtx::session::CommandAdmissionStatus;
-using idtx::session::JoinCommand;
+using idtx::session::SnapshotCommand;
 using idtx::session::SessionCommand;
 using idtx::session::SessionCommandScheduler;
 
@@ -31,12 +31,12 @@ namespace
 
 SessionCommand Tagged(std::uint64_t tag)
 {
-    return JoinCommand{tag};
+    return SnapshotCommand{tag};
 }
 
 std::uint64_t TagOf(const SessionCommand& command)
 {
-    return std::get<JoinCommand>(command).connection;
+    return std::get<SnapshotCommand>(command).connection;
 }
 
 // Records the tags a scheduler's handler saw, in execution order, and flags
@@ -408,4 +408,217 @@ TEST_CASE("scheduler: drains inline when the executor is gone or stopped")
         CHECK(threads.front() == caller);
         scheduler->WaitIdle();
     }
+}
+
+namespace
+{
+
+// Polls @p done until it holds or @p timeout elapses.
+template<typename Predicate>
+bool WaitUntil(Predicate done, std::chrono::milliseconds timeout = std::chrono::seconds{5})
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!done())
+    {
+        if (std::chrono::steady_clock::now() > deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    return true;
+}
+
+} // namespace
+
+TEST_CASE("scheduler: a paused session holds no worker and other sessions keep running")
+{
+    // One worker: if the paused session parked it, the other could not run.
+    auto executor = std::make_shared<WorkerExecutor>(1);
+    Recorder paused_recorder;
+    Recorder other_recorder;
+    auto paused = SessionCommandScheduler::Create(executor, paused_recorder.Handler());
+    auto other  = SessionCommandScheduler::Create(executor, other_recorder.Handler());
+
+    paused->Pause();
+    for (std::uint64_t i = 0; i < 5; ++i)
+    {
+        REQUIRE(paused->TrySubmit(Tagged(i)) == CommandAdmissionStatus::Accepted);
+        REQUIRE(other->TrySubmit(Tagged(i)) == CommandAdmissionStatus::Accepted);
+    }
+
+    other->WaitIdle();
+    CHECK(other_recorder.Snapshot().size() == 5);
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    CHECK(paused_recorder.Snapshot().empty());
+    CHECK(paused->ApproximatePendingCount() == 5);
+
+    paused->Resume();
+    paused->WaitIdle();
+    CHECK(paused_recorder.Snapshot() == std::vector<std::uint64_t>{0, 1, 2, 3, 4});
+}
+
+TEST_CASE("scheduler: Pause returns only after the running command finished")
+{
+    auto executor = std::make_shared<WorkerExecutor>(2);
+    std::promise<void> entered;
+    std::promise<void> gate;
+    auto gate_future = gate.get_future().share();
+    std::atomic<bool> first_done{false};
+    Recorder recorder;
+    auto record = recorder.Handler();
+
+    auto scheduler = SessionCommandScheduler::Create(executor, [&](SessionCommand&& command) {
+        if (TagOf(command) == 0)
+        {
+            entered.set_value();
+            gate_future.wait();
+            first_done = true;
+        }
+        record(std::move(command));
+    });
+
+    REQUIRE(scheduler->TrySubmit(Tagged(0)) == CommandAdmissionStatus::Accepted);
+    entered.get_future().wait();
+
+    auto pausing = std::async(std::launch::async, [&] { scheduler->Pause(); });
+    CHECK(pausing.wait_for(std::chrono::milliseconds{50}) == std::future_status::timeout);
+
+    gate.set_value();
+    pausing.wait();
+    CHECK(first_done);
+
+    REQUIRE(scheduler->TrySubmit(Tagged(1)) == CommandAdmissionStatus::Accepted);
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    CHECK(recorder.Snapshot() == std::vector<std::uint64_t>{0});
+
+    scheduler->Resume();
+    scheduler->WaitIdle();
+    CHECK(recorder.Snapshot() == std::vector<std::uint64_t>{0, 1});
+}
+
+TEST_CASE("scheduler: pauses nest")
+{
+    auto executor = std::make_shared<WorkerExecutor>(1);
+    Recorder recorder;
+    auto scheduler = SessionCommandScheduler::Create(executor, recorder.Handler());
+
+    scheduler->Pause();
+    scheduler->Pause();
+    REQUIRE(scheduler->TrySubmit(Tagged(0)) == CommandAdmissionStatus::Accepted);
+
+    scheduler->Resume();
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    CHECK(recorder.Snapshot().empty());
+
+    scheduler->Resume();
+    scheduler->WaitIdle();
+    CHECK(recorder.Snapshot() == std::vector<std::uint64_t>{0});
+}
+
+TEST_CASE("scheduler: a deferred command stays pending and runs first after Resume")
+{
+    auto executor = std::make_shared<WorkerExecutor>(1);
+    Recorder recorder;
+    auto record = recorder.Handler();
+    std::atomic<int> attempts_of_first{0};
+    std::shared_ptr<SessionCommandScheduler> scheduler;
+
+    scheduler = SessionCommandScheduler::Create(executor, [&](SessionCommand&& command) {
+        if (TagOf(command) == 1 && attempts_of_first.fetch_add(1) == 0)
+        {
+            scheduler->DeferCurrent(std::move(command));
+            return;
+        }
+        record(std::move(command));
+    });
+
+    {
+        WorkerBlocker blocker(*executor);
+        for (std::uint64_t i = 1; i <= 3; ++i)
+        {
+            REQUIRE(scheduler->TrySubmit(Tagged(i)) == CommandAdmissionStatus::Accepted);
+        }
+    }
+
+    REQUIRE(WaitUntil([&] { return attempts_of_first.load() == 1; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    CHECK(recorder.Snapshot().empty());
+    CHECK(scheduler->ApproximatePendingCount() == 3);
+
+    // A priority command submitted meanwhile does not overtake the deferred one.
+    REQUIRE(scheduler->TrySubmitPriority(Tagged(9)) == CommandAdmissionStatus::Accepted);
+
+    scheduler->Resume();
+    scheduler->WaitIdle();
+    CHECK(attempts_of_first == 2);
+    CHECK(recorder.Snapshot() == std::vector<std::uint64_t>{1, 9, 2, 3});
+}
+
+TEST_CASE("scheduler: a Resume that arrives before its deferral still resumes")
+{
+    // Models the lock's release callback firing on another thread between the
+    // failed attempt and DeferCurrent().
+    auto executor = std::make_shared<WorkerExecutor>(1);
+    Recorder recorder;
+    auto record = recorder.Handler();
+    std::atomic<int> attempts{0};
+    std::shared_ptr<SessionCommandScheduler> scheduler;
+
+    scheduler = SessionCommandScheduler::Create(executor, [&](SessionCommand&& command) {
+        if (attempts.fetch_add(1) == 0)
+        {
+            scheduler->Resume();
+            scheduler->DeferCurrent(std::move(command));
+            return;
+        }
+        record(std::move(command));
+    });
+
+    REQUIRE(scheduler->TrySubmit(Tagged(7)) == CommandAdmissionStatus::Accepted);
+    REQUIRE(WaitUntil([&] { return recorder.Snapshot().size() == 1; }));
+    scheduler->WaitIdle();
+    CHECK(attempts == 2);
+    CHECK(recorder.Snapshot() == std::vector<std::uint64_t>{7});
+}
+
+TEST_CASE("scheduler: pausing while producers submit never runs a command while paused")
+{
+    auto executor = std::make_shared<WorkerExecutor>(4);
+    std::atomic<bool> paused_flag{false};
+    std::atomic<int>  ran_while_paused{0};
+    std::atomic<int>  handled{0};
+
+    auto scheduler = SessionCommandScheduler::Create(executor, [&](SessionCommand&&) {
+        if (paused_flag.load()) ++ran_while_paused;
+        ++handled;
+    });
+
+    std::atomic<bool> stop{false};
+    std::atomic<int>  accepted{0};
+    std::vector<std::thread> producers;
+    for (int p = 0; p < 3; ++p)
+    {
+        producers.emplace_back([&] {
+            while (!stop.load())
+            {
+                if (scheduler->TrySubmit(Tagged(0)) == CommandAdmissionStatus::Accepted) ++accepted;
+                std::this_thread::yield();
+            }
+        });
+    }
+
+    for (int round = 0; round < 200; ++round)
+    {
+        scheduler->Pause();
+        paused_flag = true;
+        std::this_thread::sleep_for(std::chrono::microseconds{200});
+        paused_flag = false;
+        scheduler->Resume();
+        std::this_thread::sleep_for(std::chrono::microseconds{100});
+    }
+
+    stop = true;
+    for (auto& t : producers) t.join();
+    scheduler->WaitIdle();
+
+    CHECK(ran_while_paused == 0);
+    CHECK(handled == accepted);
 }
