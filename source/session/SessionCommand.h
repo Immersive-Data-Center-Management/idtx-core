@@ -104,18 +104,19 @@ struct JoinCommand
 };
 
 /**
- * @brief Create a built-in primitive requested by a websocket client.
+ * @brief Create a primitive requested by a websocket client.
  *
- * The consumer authors a new gprim of @c type under @c parent_path into the
- * session layer with its schema defaults, assigns it a unique name, broadcasts
- * the creation to every client (including @c origin) and sends @c origin an
- * Ack carrying @c request_id. The members are plain values, so the command is
- * trivially nothrow-movable as the mailbox requires.
+ * The consumer authors the prim described by @c request under its parent path
+ * into the session layer — a built-in typed gprim/xform, or a typeless
+ * reference/payload prim — optionally placed by the request's world-space
+ * transform, assigns it a unique name, broadcasts the creation to every client
+ * (including @c origin) and sends @c origin an Ack carrying @c request_id. The
+ * request is owned via a unique_ptr so the command stays nothrow-movable as the
+ * mailbox requires.
  */
 struct CreatePrimCommand
 {
-    std::string        parent_path;
-    idtxcore::PrimType type{idtxcore::PRIM_TYPE_UNSPECIFIED};
+    std::unique_ptr<const idtxcore::CreatePrimRequest> request;
 
     // Connection that sent the request; it receives the Ack and, like every
     // other client, the creation broadcast.
@@ -126,6 +127,23 @@ struct CreatePrimCommand
 
     std::chrono::steady_clock::time_point received_at{
         std::chrono::steady_clock::now()};
+
+    CreatePrimCommand(std::unique_ptr<const idtxcore::CreatePrimRequest> request_value,
+                      ConnectionId                                       origin_value,
+                      std::uint64_t                                      request_id_value) noexcept
+        : request(std::move(request_value))
+        , origin(origin_value)
+        , request_id(request_id_value)
+    {
+    }
+
+    CreatePrimCommand(CreatePrimCommand&&) noexcept            = default;
+    CreatePrimCommand& operator=(CreatePrimCommand&&) noexcept = default;
+
+    CreatePrimCommand(const CreatePrimCommand&)            = delete;
+    CreatePrimCommand& operator=(const CreatePrimCommand&) = delete;
+
+    ~CreatePrimCommand() noexcept = default;
 };
 
 /**

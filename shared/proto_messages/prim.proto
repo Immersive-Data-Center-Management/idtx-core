@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package idtxcore;
 
+import "transform.proto";
+
 // Built-in USD prim types a client may ask the server to create. The numeric
 // values are wire-stable; append new types, never renumber. UNSPECIFIED (0) is
 // the proto3 default and is rejected by the server. The gprim types
@@ -15,6 +17,14 @@ enum PrimType {
   PRIM_TYPE_CYLINDER = 4;
   PRIM_TYPE_CAPSULE = 5;
   PRIM_TYPE_XFORM = 6;
+  PRIM_TYPE_REF = 7;
+}
+
+// If a prim is to be created to hold a reference to another layer/prim, usd allows to store them
+// as reference or as payload. This type provides the capability to be specific about it.
+enum PrimRefType {
+  PRIM_REF_REFERENCE = 0;
+  PRIM_REF_PAYLOAD = 1;
 }
 
 // Client -> server. Ask the server to author a new built-in primitive of
@@ -28,6 +38,12 @@ message CreatePrimRequest {
   string session_id = 1;
   string parent_path = 2;
   PrimType type = 3;
+  optional PrimRefType ref_type = 4;
+  optional string reference_path = 5;
+  oneof world_transform {
+    SeparateTransform seperate = 6;
+    Matrix4dTransform matrix = 7;  
+  }
 }
 
 // Server -> all clients (including the originator) and replayed in the join
@@ -44,6 +60,12 @@ message CreatePrimBroadcast {
   optional double height = 5;
   optional double radius = 6;
   optional string axis = 7;
+  optional PrimRefType ref_type = 8;
+  optional string reference_path = 9;
+  oneof world_transform {
+    SeparateTransform seperate = 10;
+    Matrix4dTransform matrix = 11;
+  }
 }
 
 // Client -> server. Ask the server to change the active state of an existing

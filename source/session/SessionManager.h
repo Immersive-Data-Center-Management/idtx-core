@@ -278,8 +278,7 @@ public:
      * name, so there is no base_seq/staleness check.
      */
     SubmitStatus SubmitCreatePrimCommand(const std::string& session_id,
-                                         std::string parent_path,
-                                         idtxcore::PrimType type,
+                                         idtxcore::CreatePrimRequest request,
                                          ConnectionId origin,
                                          std::uint64_t request_id) const;
 

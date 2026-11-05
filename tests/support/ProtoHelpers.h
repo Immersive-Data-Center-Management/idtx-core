@@ -38,6 +38,22 @@ std::string BuildCreatePrimRequest(const std::string& session_id,
                                    idtxcore::PrimType type,
                                    std::uint64_t request_id = 0);
 
+/// As BuildCreatePrimRequest, but also carries a world-space SeparateTransform
+/// with the given translation (rotation identity, scale 1).
+std::string BuildCreatePrimRequestWithTranslate(const std::string& session_id,
+                                                const std::string& parent_path,
+                                                idtxcore::PrimType type,
+                                                double tx, double ty, double tz,
+                                                std::uint64_t request_id = 0);
+
+/// Build a serialized BaseMessage containing a CreatePrimRequest of type
+/// PRIM_TYPE_REF carrying @p ref_type and @p reference_path.
+std::string BuildCreatePrimReferenceRequest(const std::string& session_id,
+                                            const std::string& parent_path,
+                                            idtxcore::PrimRefType ref_type,
+                                            const std::string& reference_path,
+                                            std::uint64_t request_id = 0);
+
 /// Build a serialized BaseMessage containing a SetPrimActiveRequest for
 /// @p prim_path. @p active == false is a soft delete, true is its undo.
 /// @p request_id is set on the enclosing BaseMessage and echoed back in the Ack.

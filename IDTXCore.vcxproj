@@ -121,6 +121,7 @@
     <Content Include="scons\protobuf.py" />
     <Content Include="scons\vcpkg.py" />
     <Content Include="shared\proto_messages\base.proto" />
+    <Content Include="shared\proto_messages\prim.proto" />
     <Content Include="shared\proto_messages\session.proto" />
     <Content Include="shared\proto_messages\transform.proto" />
     <Content Include="tests\SConscript" />

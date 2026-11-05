@@ -437,3 +437,104 @@ TEST_CASE("create prim: an Xform may be nested under a gprim")
     REQUIRE(ack.has_value());
     CHECK(ack->ack().ok());
 }
+
+TEST_CASE("create prim honors a world transform and echoes it on the broadcast")
+{
+    TestServer server;
+    server.WaitReady();
+
+    const std::string sid = CreateSession(server, "single_edit");
+
+    WsTestClient ws;
+    auto conn = ws.Connect("127.0.0.1", server.port(), "/ws?sid=" + sid);
+    REQUIRE(conn.handshake_ok);
+    DrainHandshake(ws);
+
+    // /Root is at the origin, so the local transform authored for a child equals
+    // the requested world transform; here we assert the broadcast echoes world.
+    ws.SendBinary(idtx::tests::BuildCreatePrimRequestWithTranslate(
+        sid, "/Root", idtxcore::PRIM_TYPE_XFORM, 5.0, 6.0, 7.0, /*request_id=*/71));
+
+    auto bcast = idtx::tests::WaitForMessage(
+        ws, std::chrono::milliseconds{2000},
+        [](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kCreatePrimBroadcast;
+        });
+    REQUIRE(bcast.has_value());
+    const auto& cp = bcast->create_prim_broadcast();
+    REQUIRE(cp.has_seperate());
+    CHECK(cp.seperate().translation().x() == doctest::Approx(5.0));
+    CHECK(cp.seperate().translation().y() == doctest::Approx(6.0));
+    CHECK(cp.seperate().translation().z() == doctest::Approx(7.0));
+}
+
+TEST_CASE("create reference prim: broadcast carries type, ref kind and root-relative path")
+{
+    TestServer server;
+    server.WaitReady();
+
+    // A reference target under the uploads root, in a subfolder.
+    idtx::tests::WriteCubeUsda(server.uploads_root() / "kit" / "chair.usda");
+
+    const std::string sid = CreateSession(server, "single_edit");
+
+    WsTestClient ws;
+    auto conn = ws.Connect("127.0.0.1", server.port(), "/ws?sid=" + sid);
+    REQUIRE(conn.handshake_ok);
+    DrainHandshake(ws);
+
+    // "Absolute" against the uploads root; broadcast must come back relative to
+    // the shared stage (uploads/) as "./kit/chair.usda".
+    ws.SendBinary(idtx::tests::BuildCreatePrimReferenceRequest(
+        sid, "/Root", idtxcore::PRIM_REF_REFERENCE, "/kit/chair.usda", /*request_id=*/81));
+
+    auto bcast = idtx::tests::WaitForMessage(
+        ws, std::chrono::milliseconds{2000},
+        [](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kCreatePrimBroadcast;
+        });
+    REQUIRE(bcast.has_value());
+    const auto& cp = bcast->create_prim_broadcast();
+    CHECK(cp.type()          == idtxcore::PRIM_TYPE_REF);
+    CHECK(cp.parent_path()   == "/Root");
+    CHECK(cp.prim_name()     == "chair");
+    REQUIRE(cp.has_ref_type());
+    CHECK(cp.ref_type()      == idtxcore::PRIM_REF_REFERENCE);
+    CHECK(cp.reference_path() == "./kit/chair.usda");
+
+    auto ack = idtx::tests::WaitForMessage(
+        ws, std::chrono::milliseconds{2000},
+        [](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kAck && m.request_id() == 81;
+        });
+    REQUIRE(ack.has_value());
+    CHECK(ack->ack().ok());
+}
+
+TEST_CASE("create reference prim: a bare search-path is rejected")
+{
+    TestServer server;
+    server.WaitReady();
+
+    idtx::tests::WriteCubeUsda(server.uploads_root() / "kit" / "chair.usda");
+
+    const std::string sid = CreateSession(server, "single_edit");
+
+    WsTestClient ws;
+    auto conn = ws.Connect("127.0.0.1", server.port(), "/ws?sid=" + sid);
+    REQUIRE(conn.handshake_ok);
+    DrainHandshake(ws);
+
+    // Bare "kit/chair.usda" is a search-path-anchored asset path; the server
+    // registers no search paths and must reject it (ack not-ok, no broadcast).
+    ws.SendBinary(idtx::tests::BuildCreatePrimReferenceRequest(
+        sid, "/Root", idtxcore::PRIM_REF_REFERENCE, "kit/chair.usda", /*request_id=*/82));
+
+    auto ack = idtx::tests::WaitForMessage(
+        ws, std::chrono::milliseconds{2000},
+        [](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kAck && m.request_id() == 82;
+        });
+    REQUIRE(ack.has_value());
+    CHECK_FALSE(ack->ack().ok());
+}

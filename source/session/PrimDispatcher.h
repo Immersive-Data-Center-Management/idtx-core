@@ -46,6 +46,12 @@ struct CreatedPrim
     double      radius = 0.0;
     bool        has_axis = false;
     std::string axis;
+
+    // Set for a PRIM_TYPE_REF prim: the arc kind authored and the
+    // broadcast (root-layer-relative) reference path, `<prim>` suffix included.
+    bool                  has_ref = false;
+    idtxcore::PrimRefType ref_type = idtxcore::PRIM_REF_REFERENCE;
+    std::string           reference_path;
 };
 
 class PrimDispatcher
@@ -54,27 +60,38 @@ class PrimDispatcher
 
 public:
     /**
-     * @brief Create a built-in primitive of @p type under @p parent_path.
+     * @brief Create a primitive described by @p req under its parent path.
      *
      * Must be called from the session's command consumer, which has exclusive
      * access to the stage, with the stage's edit target set to the session
      * layer.
      *
+     * Handles the full CreatePrimRequest surface:
+     *   - a built-in typed prim (Cube/Sphere/Cone/Cylinder/Capsule/Xform), or a
+     *     typeless PRIM_TYPE_REF prim carrying a reference or payload arc
+     *     (@c ref_type) to @c reference_path;
+     *   - an optional world-space transform, converted to the prim's local
+     *     transform relative to its parent before authoring.
+     *
      * Validation (all checked before anything is authored, so a failure leaves
      * the stage untouched):
-     *   - @p parent_path is a valid, existing prim path (the absolute root
-     *     "/" is accepted);
-     *   - neither the parent nor any of its ancestors is a UsdGeomGprim, since
-     *     USD forbids nesting gprims;
-     *   - @p type is a known built-in type.
+     *   - @c parent_path is a valid, existing, active prim path ("/" accepted);
+     *   - for a gprim, neither the parent nor any ancestor is a gprim;
+     *   - for a reference prim, @c reference_path resolves to an existing USD
+     *     file under the uploads root (see ReferencePathResolver);
+     *   - @c type is a known built-in type or PRIM_TYPE_REF.
      *
-     * @param out On success, receives the resolved name/path and the authored
-     *            default attribute values.
+     * @param uploads_root The server's uploads root (the "root download folder"),
+     *                     used to resolve a reference's asset path. The root- and
+     *                     edit-layer directories are taken from @p stage.
+     * @param out On success, receives the resolved name/path, the authored
+     *            default attribute values, and (for a reference prim) the arc
+     *            kind and broadcast reference path.
      * @return true if the prim was created, false otherwise. Never throws.
      */
     static bool Create(const pxr::UsdStageRefPtr& stage,
-                       const std::string& parent_path,
-                       idtxcore::PrimType type,
+                       const idtxcore::CreatePrimRequest& req,
+                       const std::string& uploads_root,
                        CreatedPrim& out);
 
     /**
