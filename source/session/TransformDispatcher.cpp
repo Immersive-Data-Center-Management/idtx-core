@@ -9,6 +9,7 @@
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
+#include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/xformOp.h>
 
@@ -53,6 +54,25 @@ bool CanAuthorOps(const pxr::UsdPrim& prim, const idtxcore::TransformUpdate& upd
         default:
             return true;
     }
+}
+
+// Opinions are resolved only from the prim index nodes that had specs when
+// the prim was last composed. For a prim brought in by a reference or
+// payload, the node of the edit target's layer stack has none until a first
+// edit authors one, and the stage recomposes only once the apply functions'
+// SdfChangeBlock closes. Inside the block the ops authored there would be
+// invisible: AddXformOp() still sees the old op order and does not find the
+// attributes it just created. Authoring the spec beforehand, as a plain over,
+// lets the stage recompose before the block opens.
+bool EnsureEditTargetSpec(const pxr::UsdStageRefPtr& stage, const pxr::UsdPrim& prim)
+{
+    const pxr::UsdEditTarget& target = stage->GetEditTarget();
+    const pxr::SdfLayerHandle& layer = target.GetLayer();
+    if (!layer) return false;
+    const pxr::SdfPath spec_path = target.MapToSpecPath(prim.GetPath());
+    if (spec_path.IsEmpty()) return false;
+    return layer->GetPrimAtPath(spec_path)
+        || pxr::SdfCreatePrimInLayer(layer, spec_path);
 }
 
 bool ApplySeparate(pxr::UsdGeomXformable& xformable,
@@ -157,6 +177,14 @@ bool TransformDispatcher::Apply(const pxr::UsdStageRefPtr& stage,
             IDTX_LOG(IDTX_WARN,
                      "Prim '{}' has an xform op attribute with a different precision; "
                      "ignoring TransformUpdate.",
+                     prim_path_str);
+            return false;
+        }
+
+        if (!EnsureEditTargetSpec(stage, prim))
+        {
+            IDTX_LOG(IDTX_WARN, "Cannot author an override of '{}' in the edit target; "
+                                "ignoring TransformUpdate.",
                      prim_path_str);
             return false;
         }
