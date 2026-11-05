@@ -276,7 +276,7 @@ crow::response FileServingController::UploadFile(const crow::request& req)
         // half-finished state. Taken before the existence check below, so
         // that check and the replacement happen under it. Released when this
         // handler returns, or, after a replacement, once the reload is done.
-        std::shared_ptr<void> write_slot;
+        idtx::session::FileWriteSlot write_slot;
         if (overwrite)
         {
             if (auto sm = m_session_manager_.lock())

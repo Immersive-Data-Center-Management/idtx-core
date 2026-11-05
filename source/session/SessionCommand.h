@@ -21,6 +21,8 @@
 #include <idtx/proto/transform.pb.h>
 #include <idtx/proto/prim.pb.h>
 
+#include "FileWriteSlot.h"
+
 namespace idtx::session
 {
 
@@ -217,7 +219,7 @@ struct CommitCommand
     // Keeps the manager's single commit slot taken from submission until the
     // reload of the written file has finished, wherever the commit ends:
     // released when the last copy is destroyed.
-    std::shared_ptr<void> commit_slot;
+    FileWriteSlot commit_slot;
 };
 
 /** @brief Save the session layer to its sidecar file if it is dirty. */

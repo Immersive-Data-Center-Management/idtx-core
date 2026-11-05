@@ -160,7 +160,7 @@ public:
      *                  upload writes the file before its layer is reloaded.
      * @return true if the reload was queued.
      */
-    bool ReloadSharedLayer(const std::string& usd_file, std::shared_ptr<void> hold = {});
+    bool ReloadSharedLayer(const std::string& usd_file, FileWriteSlot hold = {});
 
     /**
      * @brief Take the single slot that commits hold while they write a file
@@ -174,10 +174,10 @@ public:
      * Blocks for at most @p timeout. Must not be called from a command
      * handler or while holding SharedLayers().
      *
-     * @return The slot, released when the last copy is destroyed, or null if
-     *         it did not become free in time.
+     * @return The slot, released when the last copy is destroyed, or an
+     *         empty slot if it did not become free in time.
      */
-    std::shared_ptr<void> AcquireFileWriteSlot(std::chrono::milliseconds timeout);
+    FileWriteSlot AcquireFileWriteSlot(std::chrono::milliseconds timeout);
 
     // ------------------------------------------------------------------
     // Websocket-side API
@@ -484,10 +484,6 @@ private:
     /// Recompute @p session's used_layers from its stage. The caller holds
     /// SharedLayers() and the session's consumer is not running elsewhere.
     static void RefreshUsedLayers(Session& session);
-
-    /// Ownership of the already acquired m_commit_slot_: releases it when the
-    /// last copy is destroyed, on whichever thread that happens.
-    std::shared_ptr<void> CommitSlotToken();
 
     /// Queue @p job on the layer thread. Returns false once it has stopped.
     bool PostLayerJob(std::function<void()> job);

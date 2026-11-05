@@ -1,6 +1,7 @@
 #include "SessionManager.h"
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -397,6 +398,14 @@ SessionManager::~SessionManager()
     // Every session is idle, so no drain task can be pending. Joining here
     // guarantees no worker thread outlives the manager.
     m_executor_->Stop();
+
+    // Every holder of the file-write slot (uploads, commit commands, layer
+    // jobs) is gone by now; a slot released later would touch a destroyed
+    // semaphore.
+    const bool slot_free = m_commit_slot_.try_acquire();
+    if (!slot_free)
+        IDTX_LOG(IDTX_ERROR, "SessionManager destroyed while the file-write slot is still held.");
+    assert(slot_free);
 }
 
 void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
@@ -415,11 +424,11 @@ void SessionManager::TeardownSession(const std::shared_ptr<Session>& session)
     if (session->listener) session->listener->Revoke();
 
     // Order: commit slot, then SharedLayers(), as everywhere else.
-    std::shared_ptr<void> commit_slot;
+    FileWriteSlot commit_slot;
     if (session->auto_commit)
     {
         m_commit_slot_.acquire();
-        commit_slot = CommitSlotToken();
+        commit_slot = FileWriteSlot(m_commit_slot_);
     }
     std::shared_lock layers(idtx::concurrency::SharedLayers());
 
@@ -702,7 +711,7 @@ SessionManager::FindByUsdFile(const std::string& usd_file) const
     return matches;
 }
 
-bool SessionManager::ReloadSharedLayer(const std::string& usd_file, std::shared_ptr<void> hold)
+bool SessionManager::ReloadSharedLayer(const std::string& usd_file, FileWriteSlot hold)
 {
     std::filesystem::path resolved;
     if (m_locator_.Resolve(usd_file, resolved) != idtx::utils::UsdFileLocator::Status::Ok)
@@ -728,15 +737,10 @@ bool SessionManager::ReloadSharedLayer(const std::string& usd_file, std::shared_
     });
 }
 
-std::shared_ptr<void> SessionManager::AcquireFileWriteSlot(std::chrono::milliseconds timeout)
+FileWriteSlot SessionManager::AcquireFileWriteSlot(std::chrono::milliseconds timeout)
 {
-    if (!m_commit_slot_.try_acquire_for(timeout)) return nullptr;
-    return CommitSlotToken();
-}
-
-std::shared_ptr<void> SessionManager::CommitSlotToken()
-{
-    return std::shared_ptr<void>(nullptr, [this](void*) { m_commit_slot_.release(); });
+    if (!m_commit_slot_.try_acquire_for(timeout)) return {};
+    return FileWriteSlot(m_commit_slot_);
 }
 
 bool SessionManager::PostLayerJob(std::function<void()> job)
@@ -1792,7 +1796,7 @@ SessionManager::CommitStatus SessionManager::SubmitCommitSessionCommand(const st
     }
 
     CommitCommand command;
-    command.commit_slot = CommitSlotToken();
+    command.commit_slot = FileWriteSlot(m_commit_slot_);
     std::future<CommitResult> future = command.result.get_future();
 
     const auto status = Submit(*session, std::move(command));
