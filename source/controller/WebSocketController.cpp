@@ -111,7 +111,7 @@ void WebSocketController::OnOpen(crow::websocket::connection& conn)
     auto* hs = msg.mutable_handshake();
     hs->set_session_id(session->id);
     hs->set_usd_path(session->usd_file);
-    hs->set_usd_uri(std::string("/api/v1/download/") + session->usd_file);
+    hs->set_usd_uri(idtx::session::SessionManager::DownloadUri(session->usd_file));
 
     std::string payload;
     if (msg.SerializeToString(&payload))
@@ -272,9 +272,33 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
             if (ack_msg.SerializeToString(&payload)) conn.send_binary(payload);
             break;
         }
+        case idtxcore::BaseMessage::kSnapshotRequest:
+        {
+            // Queue a snapshot of the session's state for this client, for
+            // example after it rebuilt its stage on LayerReloaded. When
+            // accepted, the consumer sends it in command order, ending with a
+            // SnapshotComplete that echoes request_id. Only a request the
+            // session could not accept is answered here.
+            const std::uint64_t request_id = msg.request_id();
+            const auto status = m_manager_->SubmitSnapshotRequestCommand(
+                ws_data->session_id, ws_data->connection_id, request_id);
+            if (status == SubmitStatus::Accepted) break;
+
+            idtxcore::BaseMessage ack_msg;
+            ack_msg.set_session_id(ws_data->session_id);
+            ack_msg.set_request_id(request_id);
+            auto* ack = ack_msg.mutable_ack();
+            ack->set_ok(false);
+            ack->set_error(RejectionReason(status));
+
+            std::string payload;
+            if (ack_msg.SerializeToString(&payload)) conn.send_binary(payload);
+            break;
+        }
         case idtxcore::BaseMessage::kXformBroadcast:
         case idtxcore::BaseMessage::kCreatePrimBroadcast:
         case idtxcore::BaseMessage::kSetPrimActiveBroadcast:
+        case idtxcore::BaseMessage::kLayerReloaded:
         case idtxcore::BaseMessage::kAck:
         case idtxcore::BaseMessage::kError:
         case idtxcore::BaseMessage::kSnapshotComplete:

@@ -273,8 +273,8 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
 
         // No SdfChangeBlock here: defining a prim is Usd-level authoring, which
         // USD advises against performing inside a change block. The resync
-        // notice this fires is suppressed by the caller's create_in_progress
-        // flag, so coalescing notices buys nothing.
+        // notice this fires is suppressed by the caller's authoring context
+        // (AuthoringContext::creating), so coalescing notices buys nothing.
         if (!AuthorPrim(stage, child, type))
         {
             IDTX_LOG(IDTX_ERROR, "Failed to author {} at '{}'.", base_name.GetString(), out.prim_path);
