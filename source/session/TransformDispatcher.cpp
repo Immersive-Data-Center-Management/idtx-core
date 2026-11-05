@@ -1,15 +1,22 @@
 #include "TransformDispatcher.h"
 
+#include <vector>
+
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/base/gf/vec3f.h>
+#include <pxr/base/vt/types.h>
 #include <pxr/base/vt/value.h>
 #include <pxr/usd/sdf/attributeSpec.h>
+#include <pxr/usd/sdf/changeBlock.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/primSpec.h>
+#include <pxr/usd/sdf/types.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/xformOp.h>
 
@@ -27,8 +34,9 @@ constexpr auto kRotatePrecision    = pxr::UsdGeomXformOp::PrecisionFloat;
 constexpr auto kScalePrecision     = pxr::UsdGeomXformOp::PrecisionFloat;
 constexpr auto kMatrixPrecision    = pxr::UsdGeomXformOp::PrecisionDouble;
 
-// UsdGeomXformable::AddXformOp fails if an attribute with the op's name
-// already exists with another value type (for example a float translate).
+// The op's attribute must keep the type it already has in the composed
+// prim (for example a float translate): AuthorOps() would otherwise author a
+// conflicting type over a weaker layer's opinion.
 bool CanAddOp(const pxr::UsdPrim&                  prim,
               const pxr::UsdGeomXformOp::Type      type,
               const pxr::UsdGeomXformOp::Precision precision)
@@ -38,8 +46,7 @@ bool CanAddOp(const pxr::UsdPrim&                  prim,
 }
 
 // True if every op the update authors can be added. Checked before anything
-// is changed, because the apply functions clear the op order first and a
-// failure after that would leave the prim modified.
+// is changed, so a type mismatch never leaves the prim half modified.
 bool CanAuthorOps(const pxr::UsdPrim& prim, const idtxcore::TransformUpdate& upd)
 {
     switch (upd.transform_case())
@@ -56,77 +63,100 @@ bool CanAuthorOps(const pxr::UsdPrim& prim, const idtxcore::TransformUpdate& upd
     }
 }
 
-// Opinions are resolved only from the prim index nodes that had specs when
-// the prim was last composed. For a prim brought in by a reference or
-// payload, the node of the edit target's layer stack has none until a first
-// edit authors one, and the stage recomposes only once the apply functions'
-// SdfChangeBlock closes. Inside the block the ops authored there would be
-// invisible: AddXformOp() still sees the old op order and does not find the
-// attributes it just created. Authoring the spec beforehand, as a plain over,
-// lets the stage recompose before the block opens.
-bool EnsureEditTargetSpec(const pxr::UsdStageRefPtr& stage, const pxr::UsdPrim& prim)
+// One xform op and the value to author for it.
+struct OpValue
+{
+    pxr::UsdGeomXformOp::Type      type;
+    pxr::UsdGeomXformOp::Precision precision;
+    pxr::VtValue                   value;
+};
+
+// Author the attribute's default value, creating the attribute spec if the
+// prim spec has none for it yet.
+bool SetDefault(const pxr::SdfPrimSpecHandle& prim_spec,
+                const pxr::TfToken&           name,
+                const pxr::SdfValueTypeName&  type,
+                const pxr::SdfVariability     variability,
+                const pxr::VtValue&           value)
+{
+    pxr::SdfAttributeSpecHandle attr = prim_spec->GetAttributeAtPath(
+        prim_spec->GetPath().AppendProperty(name));
+    if (!attr) attr = pxr::SdfAttributeSpec::New(prim_spec, name.GetString(), type, variability);
+    return attr && attr->SetDefaultValue(value);
+}
+
+// Replace the prim's op stack in the edit target with @p ops, in order.
+// Only Sdf is used inside the change block: the stage does not recompose
+// until the block closes, so Usd API would read a stale view of the prim
+// (for a prim from a reference or payload it would not even see what was
+// just authored). Everything that reads the stage runs before, in Apply().
+bool AuthorOps(const pxr::UsdStageRefPtr&  stage,
+               const pxr::UsdPrim&         prim,
+               const std::vector<OpValue>& ops)
 {
     const pxr::UsdEditTarget& target = stage->GetEditTarget();
     const pxr::SdfLayerHandle& layer = target.GetLayer();
-    if (!layer) return false;
-    const pxr::SdfPath spec_path = target.MapToSpecPath(prim.GetPath());
-    if (spec_path.IsEmpty()) return false;
-    return layer->GetPrimAtPath(spec_path)
-        || pxr::SdfCreatePrimInLayer(layer, spec_path);
+    const pxr::SdfPath path = target.MapToSpecPath(prim.GetPath());
+    if (!layer || path.IsEmpty()) return false;
+
+    // Coalesces the writes below into a single notice.
+    pxr::SdfChangeBlock block;
+
+    // Returns the existing spec, or creates an over for a prim the layer has
+    // none for yet.
+    const pxr::SdfPrimSpecHandle prim_spec = pxr::SdfCreatePrimInLayer(layer, path);
+    if (!prim_spec) return false;
+
+    pxr::VtTokenArray order;
+    order.reserve(ops.size());
+    for (const OpValue& op : ops)
+    {
+        const pxr::TfToken name = pxr::UsdGeomXformOp::GetOpName(op.type);
+        if (!SetDefault(prim_spec, name,
+                        pxr::UsdGeomXformOp::GetValueTypeName(op.type, op.precision),
+                        pxr::SdfVariabilityVarying, op.value))
+        {
+            return false;
+        }
+        order.push_back(name);
+    }
+    return SetDefault(prim_spec, pxr::UsdGeomTokens->xformOpOrder,
+                      pxr::SdfValueTypeNames->TokenArray, pxr::SdfVariabilityUniform,
+                      pxr::VtValue(order));
 }
 
-bool ApplySeparate(pxr::UsdGeomXformable& xformable,
+bool ApplySeparate(const pxr::UsdStageRefPtr&         stage,
+                   const pxr::UsdPrim&                prim,
                    const idtxcore::SeparateTransform& sep)
 {
-    // this ChangeBlock ensures the TfNotice triggers only once after it goes out of scope reducing the noice
-    // of the different set operations below
-    pxr::SdfChangeBlock block;
-    
-    // Reset the xform op stack so we author a clean t-r-s sequence.
-    bool reset_xform_stack = false;
-    xformable.SetXformOpOrder({}, reset_xform_stack);
-
-    auto translateOp = xformable.AddTranslateOp(kTranslatePrecision);
-    auto rotateOp    = xformable.AddRotateXYZOp(kRotatePrecision);
-    auto scaleOp     = xformable.AddScaleOp(kScalePrecision);
-
-    if (!translateOp || !rotateOp || !scaleOp) return false;
-
     const auto& t = sep.translation();
     const auto& r = sep.rotation();
     const auto& s = sep.scale();
-
-    translateOp.Set(pxr::GfVec3d(t.x(), t.y(), t.z()));
-    rotateOp.Set(pxr::GfVec3f(static_cast<float>(r.x()),
-                              static_cast<float>(r.y()),
-                              static_cast<float>(r.z())));
-    scaleOp.Set(pxr::GfVec3f(static_cast<float>(s.x()),
-                             static_cast<float>(s.y()),
-                             static_cast<float>(s.z())));
-    return true;
+    return AuthorOps(stage, prim, {
+        {pxr::UsdGeomXformOp::TypeTranslate, kTranslatePrecision,
+         pxr::VtValue(pxr::GfVec3d(t.x(), t.y(), t.z()))},
+        {pxr::UsdGeomXformOp::TypeRotateXYZ, kRotatePrecision,
+         pxr::VtValue(pxr::GfVec3f(static_cast<float>(r.x()),
+                                   static_cast<float>(r.y()),
+                                   static_cast<float>(r.z())))},
+        {pxr::UsdGeomXformOp::TypeScale, kScalePrecision,
+         pxr::VtValue(pxr::GfVec3f(static_cast<float>(s.x()),
+                                   static_cast<float>(s.y()),
+                                   static_cast<float>(s.z())))},
+    });
 }
 
-bool ApplyMatrix(pxr::UsdGeomXformable& xformable,
+bool ApplyMatrix(const pxr::UsdStageRefPtr&         stage,
+                 const pxr::UsdPrim&                prim,
                  const idtxcore::Matrix4dTransform& m)
 {
-    // this ChangeBlock ensures the TfNotice triggers only once after it goes out of scope reducing the noise
-    // of the different set operations below
-    pxr::SdfChangeBlock block;
-    
-    bool reset_xform_stack = false;
-    xformable.SetXformOpOrder({}, reset_xform_stack);
-
-    auto op = xformable.AddTransformOp(kMatrixPrecision);
-    if (!op) return false;
-
-    pxr::GfMatrix4d gfm(
+    const pxr::GfMatrix4d gfm(
         m.m00(), m.m01(), m.m02(), m.m03(),
         m.m10(), m.m11(), m.m12(), m.m13(),
         m.m20(), m.m21(), m.m22(), m.m23(),
         m.m30(), m.m31(), m.m32(), m.m33());
-
-    op.Set(gfm);
-    return true;
+    return AuthorOps(stage, prim,
+                     {{pxr::UsdGeomXformOp::TypeTransform, kMatrixPrecision, pxr::VtValue(gfm)}});
 }
 
 } // namespace
@@ -162,10 +192,18 @@ bool TransformDispatcher::Apply(const pxr::UsdStageRefPtr& stage,
         return false;
     }
 
-    pxr::UsdGeomXformable xformable(prim);
-    if (!xformable)
+    if (!pxr::UsdGeomXformable(prim))
     {
         IDTX_LOG(IDTX_WARN, "Prim '{}' is not Xformable; ignoring TransformUpdate.",
+                 prim_path_str);
+        return false;
+    }
+
+    // AuthorOps() writes through Sdf and so bypasses the stage's own check:
+    // an opinion on an instance proxy or prototype would have no effect.
+    if (prim.IsInstanceProxy() || prim.IsInPrototype())
+    {
+        IDTX_LOG(IDTX_WARN, "Prim '{}' is part of an instance; ignoring TransformUpdate.",
                  prim_path_str);
         return false;
     }
@@ -181,20 +219,12 @@ bool TransformDispatcher::Apply(const pxr::UsdStageRefPtr& stage,
             return false;
         }
 
-        if (!EnsureEditTargetSpec(stage, prim))
-        {
-            IDTX_LOG(IDTX_WARN, "Cannot author an override of '{}' in the edit target; "
-                                "ignoring TransformUpdate.",
-                     prim_path_str);
-            return false;
-        }
-
         switch (upd.transform_case())
         {
             case idtxcore::TransformUpdate::kSeperate:
-                return ApplySeparate(xformable, upd.seperate());
+                return ApplySeparate(stage, prim, upd.seperate());
             case idtxcore::TransformUpdate::kMatrix:
-                return ApplyMatrix(xformable, upd.matrix());
+                return ApplyMatrix(stage, prim, upd.matrix());
             case idtxcore::TransformUpdate::TRANSFORM_NOT_SET:
             default:
                 IDTX_LOG(IDTX_WARN, "TransformUpdate for '{}' has no transform set.",
