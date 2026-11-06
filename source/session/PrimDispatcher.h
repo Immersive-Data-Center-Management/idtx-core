@@ -30,8 +30,8 @@ namespace session
  *
  * Only the attribute members flagged present apply to the created type:
  * Cube -> size; Sphere -> radius; Cone/Cylinder/Capsule -> height, radius,
- * axis. The SessionManager copies the present members into the outgoing
- * CreatePrimBroadcast.
+ * axis; Plane -> width, length, axis. The SessionManager copies the present
+ * members into the outgoing CreatePrimBroadcast.
  */
 struct CreatedPrim
 {
@@ -46,6 +46,10 @@ struct CreatedPrim
     double      radius = 0.0;
     bool        has_axis = false;
     std::string axis;
+    bool        has_width = false;
+    double      width = 0.0;
+    bool        has_length = false;
+    double      length = 0.0;
 
     // Set for a PRIM_TYPE_REF prim: the arc kind authored and the
     // broadcast (root-layer-relative) reference path, `<prim>` suffix included.
@@ -67,8 +71,8 @@ public:
      * layer.
      *
      * Handles the full CreatePrimRequest surface:
-     *   - a built-in typed prim (Cube/Sphere/Cone/Cylinder/Capsule/Xform), or a
-     *     typeless PRIM_TYPE_REF prim carrying a reference or payload arc
+     *   - a built-in typed prim (Cube/Sphere/Cone/Cylinder/Capsule/Plane/Xform),
+     *     or a typeless PRIM_TYPE_REF prim carrying a reference or payload arc
      *     (@c ref_type) to @c reference_path;
      *   - an optional world-space transform, converted to the prim's local
      *     transform relative to its parent before authoring.

@@ -12,6 +12,10 @@
 #include <pxr/base/tf/token.h>
 #include <pxr/base/tf/type.h>
 #include <pxr/base/vt/value.h>
+#include <pxr/usd/pcp/layerStack.h>
+#include <pxr/usd/pcp/node.h>
+#include <pxr/usd/pcp/primIndex.h>
+#include <pxr/usd/pcp/types.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/sdf/payload.h>
@@ -28,6 +32,7 @@
 #include <pxr/usd/usdGeom/cube.h>
 #include <pxr/usd/usdGeom/cylinder.h>
 #include <pxr/usd/usdGeom/gprim.h>
+#include <pxr/usd/usdGeom/plane.h>
 #include <pxr/usd/usdGeom/sphere.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xform.h>
@@ -59,6 +64,7 @@ pxr::TfType UsdSchemaType(idtxcore::PrimType type)
         case idtxcore::PRIM_TYPE_CONE:     return pxr::TfType::Find<pxr::UsdGeomCone>();
         case idtxcore::PRIM_TYPE_CYLINDER: return pxr::TfType::Find<pxr::UsdGeomCylinder>();
         case idtxcore::PRIM_TYPE_CAPSULE:  return pxr::TfType::Find<pxr::UsdGeomCapsule>();
+        case idtxcore::PRIM_TYPE_PLANE:    return pxr::TfType::Find<pxr::UsdGeomPlane>();
         case idtxcore::PRIM_TYPE_XFORM:    return pxr::TfType::Find<pxr::UsdGeomXform>();
         case idtxcore::PRIM_TYPE_UNSPECIFIED:
         default:                           return pxr::TfType();
@@ -202,27 +208,70 @@ bool AuthorLocalTransformFromWorld(const pxr::UsdPrim& prim,
     return true;
 }
 
-// True if every opinion contributing to @p prim lives on the stage's local
-// layers (its root layer or this session's layer) and nowhere else. A prim
-// introduced across a reference or payload, or defined in a sublayer, has at
-// least one contributing spec on a foreign layer and so is NOT locally
-// deletable: its definition cannot be masked by a session-layer `active=false`
-// in a way we can later fold into the committed root file. Covers both a
-// root-authored prim (spec on the root layer, plus our session overrides) and
-// a prim created earlier this session (spec only on the session layer).
+// True if @p prim's existence was authored locally — on the stage's root layer
+// or this session's layer — so it can be masked with a session-layer
+// `active=false` and later folded into the committed root file. A prim defined
+// in a sublayer, or introduced across a reference/payload authored on an
+// ancestor, is NOT locally deletable: its definition is owed to a foreign
+// layer we cannot fold away.
+//
+// The subtlety is a *reference prim* we created this session: a typeless def on
+// the local layer that carries a reference or payload arc. Its composed prim
+// stack includes the target's specs on the referenced layer, so a naive
+// "every spec is on a local layer" test wrongly rejects it. Those foreign
+// specs are the prim's own reference content and must be ignored.
+//
+// So the check walks the prim's composition graph (Pcp) node by node instead
+// of its flattened spec stack. A node whose opinions reach the prim through a
+// reference or payload authored directly on the prim (PcpNodeRef::
+// IsDueToAncestor() is false) — and every node beneath it — is the prim's own
+// reference content and is accepted. Every other contributing node must draw
+// its opinions only from the root or session layer: a spec on a sublayer, or
+// any opinion pulled across an ancestral arc (reference/payload/inherit/
+// specialize/variant), makes the prim non-locally-deletable.
 bool IsLocallyDeletable(const pxr::UsdPrim& prim,
                         const pxr::SdfLayerHandle& root_layer,
                         const pxr::SdfLayerHandle& session_layer)
 {
-    const pxr::SdfPrimSpecHandleVector stack = prim.GetPrimStack();
-    if (stack.empty()) return false;
-    for (const pxr::SdfPrimSpecHandle& spec : stack)
+    const pxr::PcpPrimIndex& index = prim.GetPrimIndex();
+    if (!index.IsValid()) return false;
+
+    for (const pxr::PcpNodeRef& node : index.GetNodeRange())
     {
-        if (!spec) continue;
-        const pxr::SdfLayerHandle layer = spec->GetLayer();
-        if (layer != root_layer && layer != session_layer) return false;
+        if (!node.HasSpecs()) continue;
+
+        // Is this node reached through a reference or payload authored directly
+        // on the prim (not inherited from a namespace ancestor)? Walk up the
+        // graph: if any node on the path to the root is such an arc, every spec
+        // here is the prim's own reference content and is fine.
+        bool own_reference_content = false;
+        for (pxr::PcpNodeRef n = node; n; n = n.GetParentNode())
+        {
+            const pxr::PcpArcType arc = n.GetArcType();
+            if ((arc == pxr::PcpArcTypeReference || arc == pxr::PcpArcTypePayload)
+                && !n.IsDueToAncestor())
+            {
+                own_reference_content = true;
+                break;
+            }
+        }
+        if (own_reference_content) continue;
+
+        // Otherwise this node contributes a local or ancestral opinion. It is
+        // acceptable only when its spec lives on the root or session layer; a
+        // spec on any other layer in its layer stack (a sublayer, or a layer
+        // pulled across an ancestral arc) is foreign and cannot be folded away.
+        for (const pxr::SdfLayerRefPtr& layer : node.GetLayerStack()->GetLayers())
+        {
+            const pxr::SdfLayerHandle handle(layer);
+            if (handle == root_layer || handle == session_layer) continue;
+            if (layer->HasSpec(node.GetPath())) return false;
+        }
     }
-    return true;
+
+    // A prim with no authored specs anywhere (e.g. a pure composition artifact)
+    // is not something we can delete locally.
+    return !prim.GetPrimStack().empty();
 }
 
 } // namespace
@@ -234,6 +283,7 @@ idtxcore::PrimType PrimDispatcher::TypeFromName(const std::string& type_name)
     if (type_name == "Cone")     return idtxcore::PRIM_TYPE_CONE;
     if (type_name == "Cylinder") return idtxcore::PRIM_TYPE_CYLINDER;
     if (type_name == "Capsule")  return idtxcore::PRIM_TYPE_CAPSULE;
+    if (type_name == "Plane")    return idtxcore::PRIM_TYPE_PLANE;
     if (type_name == "Xform")    return idtxcore::PRIM_TYPE_XFORM;
     return idtxcore::PRIM_TYPE_UNSPECIFIED;
 }
@@ -275,6 +325,14 @@ void PrimDispatcher::ReadAttributes(const pxr::UsdPrim& prim,
             out.has_height = cap.GetHeightAttr().Get(&out.height);
             out.has_radius = cap.GetRadiusAttr().Get(&out.radius);
             if ((out.has_axis = cap.GetAxisAttr().Get(&axis))) out.axis = axis.GetString();
+            break;
+        }
+        case idtxcore::PRIM_TYPE_PLANE:
+        {
+            pxr::UsdGeomPlane plane(prim);
+            out.has_width  = plane.GetWidthAttr().Get(&out.width);
+            out.has_length = plane.GetLengthAttr().Get(&out.length);
+            if ((out.has_axis = plane.GetAxisAttr().Get(&axis))) out.axis = axis.GetString();
             break;
         }
         case idtxcore::PRIM_TYPE_XFORM:        // a transform group has no shape attributes
@@ -581,6 +639,19 @@ void PrimDispatcher::ReadSchemaDefaults(idtxcore::PrimType type, CreatedPrim& ou
         {
             out.has_height = get_double(pxr::UsdGeomTokens->height, out.height);
             out.has_radius = get_double(pxr::UsdGeomTokens->radius, out.radius);
+            pxr::VtValue axis;
+            if (def->GetAttributeFallbackValue(pxr::UsdGeomTokens->axis, &axis)
+                && axis.IsHolding<pxr::TfToken>())
+            {
+                out.axis = axis.UncheckedGet<pxr::TfToken>().GetString();
+                out.has_axis = true;
+            }
+            break;
+        }
+        case idtxcore::PRIM_TYPE_PLANE:
+        {
+            out.has_width  = get_double(pxr::UsdGeomTokens->width, out.width);
+            out.has_length = get_double(pxr::UsdGeomTokens->length, out.length);
             pxr::VtValue axis;
             if (def->GetAttributeFallbackValue(pxr::UsdGeomTokens->axis, &axis)
                 && axis.IsHolding<pxr::TfToken>())

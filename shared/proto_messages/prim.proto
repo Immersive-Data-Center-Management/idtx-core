@@ -17,7 +17,8 @@ enum PrimType {
   PRIM_TYPE_CYLINDER = 4;
   PRIM_TYPE_CAPSULE = 5;
   PRIM_TYPE_XFORM = 6;
-  PRIM_TYPE_REF = 7;
+  PRIM_TYPE_PLANE = 7;
+  PRIM_TYPE_REF = 8;
 }
 
 // If a prim is to be created to hold a reference to another layer/prim, usd allows to store them
@@ -56,15 +57,26 @@ message CreatePrimBroadcast {
   string parent_path = 1;
   string prim_name = 2;
   PrimType type = 3;
+  // Size is relevant for Cube only
   optional double size = 4;
+  // Height is relevant for Cylinder, Cone and Capsule only
   optional double height = 5;
+  // Radius is relevant for Cylinder, Cone, Capsule and Sphere only
   optional double radius = 6;
+  // Axis is relevant for Cylinder, Cone, Capsule and Plane only
   optional string axis = 7;
-  optional PrimRefType ref_type = 8;
-  optional string reference_path = 9;
+  // Width is relevant for Plane only
+  optional double width = 8;
+  // Length is relevant for Plane only
+  optional double length = 9;
+  // Refernce Type is relevant for referencing prims only
+  optional PrimRefType ref_type = 10;
+  // The reference path as relative to the stage the reference is embedded into
+  optional string reference_path = 11;
+  // The optional transform of the prim
   oneof world_transform {
-    SeparateTransform seperate = 10;
-    Matrix4dTransform matrix = 11;
+    SeparateTransform seperate = 12;
+    Matrix4dTransform matrix = 13;
   }
 }
 

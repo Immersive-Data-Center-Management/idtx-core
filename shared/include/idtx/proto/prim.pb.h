@@ -96,7 +96,8 @@ enum PrimType : int {
   PRIM_TYPE_CYLINDER = 4,
   PRIM_TYPE_CAPSULE = 5,
   PRIM_TYPE_XFORM = 6,
-  PRIM_TYPE_REF = 7,
+  PRIM_TYPE_PLANE = 7,
+  PRIM_TYPE_REF = 8,
   PrimType_INT_MIN_SENTINEL_DO_NOT_USE_ =
       ::std::numeric_limits<::int32_t>::min(),
   PrimType_INT_MAX_SENTINEL_DO_NOT_USE_ =
@@ -107,11 +108,11 @@ extern const uint32_t PrimType_internal_data_[];
 inline constexpr PrimType PrimType_MIN =
     static_cast<PrimType>(0);
 inline constexpr PrimType PrimType_MAX =
-    static_cast<PrimType>(7);
+    static_cast<PrimType>(8);
 inline bool PrimType_IsValid(int value) {
-  return 0 <= value && value <= 7;
+  return 0 <= value && value <= 8;
 }
-inline constexpr int PrimType_ARRAYSIZE = 7 + 1;
+inline constexpr int PrimType_ARRAYSIZE = 8 + 1;
 const ::google::protobuf::EnumDescriptor* PROTOBUF_NONNULL PrimType_descriptor();
 template <typename T>
 const ::std::string& PrimType_Name(T value) {
@@ -122,7 +123,7 @@ const ::std::string& PrimType_Name(T value) {
 }
 template <>
 inline const ::std::string& PrimType_Name(PrimType value) {
-  return ::google::protobuf::internal::NameOfDenseEnum<PrimType_descriptor, 0, 7>(
+  return ::google::protobuf::internal::NameOfDenseEnum<PrimType_descriptor, 0, 8>(
       static_cast<int>(value));
 }
 inline bool PrimType_Parse(
@@ -972,8 +973,8 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
         &_CreatePrimBroadcast_default_instance_);
   }
   enum WorldTransformCase {
-    kSeperate = 10,
-    kMatrix = 11,
+    kSeperate = 12,
+    kMatrix = 13,
     WORLD_TRANSFORM_NOT_SET = 0,
   };
   static constexpr int kIndexInFileMessages = 1;
@@ -1066,14 +1067,16 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
     kParentPathFieldNumber = 1,
     kPrimNameFieldNumber = 2,
     kAxisFieldNumber = 7,
-    kReferencePathFieldNumber = 9,
+    kReferencePathFieldNumber = 11,
     kSizeFieldNumber = 4,
     kHeightFieldNumber = 5,
-    kTypeFieldNumber = 3,
-    kRefTypeFieldNumber = 8,
     kRadiusFieldNumber = 6,
-    kSeperateFieldNumber = 10,
-    kMatrixFieldNumber = 11,
+    kTypeFieldNumber = 3,
+    kRefTypeFieldNumber = 10,
+    kWidthFieldNumber = 8,
+    kLengthFieldNumber = 9,
+    kSeperateFieldNumber = 12,
+    kMatrixFieldNumber = 13,
   };
   // string parent_path = 1;
   void clear_parent_path() ;
@@ -1121,7 +1124,7 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
   ::std::string* PROTOBUF_NONNULL _internal_mutable_axis();
 
   public:
-  // optional string reference_path = 9;
+  // optional string reference_path = 11;
   bool has_reference_path() const;
   void clear_reference_path() ;
   const ::std::string& reference_path() const;
@@ -1159,27 +1162,6 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
   void _internal_set_height(double value);
 
   public:
-  // .idtxcore.PrimType type = 3;
-  void clear_type() ;
-  ::idtxcore::PrimType type() const;
-  void set_type(::idtxcore::PrimType value);
-
-  private:
-  ::idtxcore::PrimType _internal_type() const;
-  void _internal_set_type(::idtxcore::PrimType value);
-
-  public:
-  // optional .idtxcore.PrimRefType ref_type = 8;
-  bool has_ref_type() const;
-  void clear_ref_type() ;
-  ::idtxcore::PrimRefType ref_type() const;
-  void set_ref_type(::idtxcore::PrimRefType value);
-
-  private:
-  ::idtxcore::PrimRefType _internal_ref_type() const;
-  void _internal_set_ref_type(::idtxcore::PrimRefType value);
-
-  public:
   // optional double radius = 6;
   bool has_radius() const;
   void clear_radius() ;
@@ -1191,7 +1173,50 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
   void _internal_set_radius(double value);
 
   public:
-  // .idtxcore.SeparateTransform seperate = 10;
+  // .idtxcore.PrimType type = 3;
+  void clear_type() ;
+  ::idtxcore::PrimType type() const;
+  void set_type(::idtxcore::PrimType value);
+
+  private:
+  ::idtxcore::PrimType _internal_type() const;
+  void _internal_set_type(::idtxcore::PrimType value);
+
+  public:
+  // optional .idtxcore.PrimRefType ref_type = 10;
+  bool has_ref_type() const;
+  void clear_ref_type() ;
+  ::idtxcore::PrimRefType ref_type() const;
+  void set_ref_type(::idtxcore::PrimRefType value);
+
+  private:
+  ::idtxcore::PrimRefType _internal_ref_type() const;
+  void _internal_set_ref_type(::idtxcore::PrimRefType value);
+
+  public:
+  // optional double width = 8;
+  bool has_width() const;
+  void clear_width() ;
+  double width() const;
+  void set_width(double value);
+
+  private:
+  double _internal_width() const;
+  void _internal_set_width(double value);
+
+  public:
+  // optional double length = 9;
+  bool has_length() const;
+  void clear_length() ;
+  double length() const;
+  void set_length(double value);
+
+  private:
+  double _internal_length() const;
+  void _internal_set_length(double value);
+
+  public:
+  // .idtxcore.SeparateTransform seperate = 12;
   bool has_seperate() const;
   private:
   bool _internal_has_seperate() const;
@@ -1210,7 +1235,7 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
   ::idtxcore::SeparateTransform* PROTOBUF_NONNULL _internal_mutable_seperate();
 
   public:
-  // .idtxcore.Matrix4dTransform matrix = 11;
+  // .idtxcore.Matrix4dTransform matrix = 13;
   bool has_matrix() const;
   private:
   bool _internal_has_matrix() const;
@@ -1239,7 +1264,7 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
   inline bool has_world_transform() const;
   inline void clear_has_world_transform();
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<4, 11,
+  static const ::google::protobuf::internal::TcParseTable<4, 13,
                                    2, 83,
                                    2>
       _table_;
@@ -1267,9 +1292,11 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
     ::google::protobuf::internal::ArenaStringPtr reference_path_;
     double size_;
     double height_;
+    double radius_;
     int type_;
     int ref_type_;
-    double radius_;
+    double width_;
+    double length_;
     union WorldTransformUnion {
       constexpr WorldTransformUnion() : _constinit_{} {}
       ::google::protobuf::internal::ConstantInitialized _constinit_;
@@ -1844,7 +1871,7 @@ inline void CreatePrimBroadcast::clear_type() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.type_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000040U);
+                  0x00000080U);
 }
 inline ::idtxcore::PrimType CreatePrimBroadcast::type() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.type)
@@ -1852,7 +1879,7 @@ inline ::idtxcore::PrimType CreatePrimBroadcast::type() const {
 }
 inline void CreatePrimBroadcast::set_type(::idtxcore::PrimType value) {
   _internal_set_type(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.type)
 }
 inline ::idtxcore::PrimType CreatePrimBroadcast::_internal_type() const {
@@ -1924,14 +1951,14 @@ inline void CreatePrimBroadcast::_internal_set_height(double value) {
 
 // optional double radius = 6;
 inline bool CreatePrimBroadcast::has_radius() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000040U);
   return value;
 }
 inline void CreatePrimBroadcast::clear_radius() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.radius_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000100U);
+                  0x00000040U);
 }
 inline double CreatePrimBroadcast::radius() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.radius)
@@ -1939,7 +1966,7 @@ inline double CreatePrimBroadcast::radius() const {
 }
 inline void CreatePrimBroadcast::set_radius(double value) {
   _internal_set_radius(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.radius)
 }
 inline double CreatePrimBroadcast::_internal_radius() const {
@@ -2020,16 +2047,74 @@ inline void CreatePrimBroadcast::set_allocated_axis(::std::string* PROTOBUF_NULL
   // @@protoc_insertion_point(field_set_allocated:idtxcore.CreatePrimBroadcast.axis)
 }
 
-// optional .idtxcore.PrimRefType ref_type = 8;
+// optional double width = 8;
+inline bool CreatePrimBroadcast::has_width() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000200U);
+  return value;
+}
+inline void CreatePrimBroadcast::clear_width() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.width_ = 0;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000200U);
+}
+inline double CreatePrimBroadcast::width() const {
+  // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.width)
+  return _internal_width();
+}
+inline void CreatePrimBroadcast::set_width(double value) {
+  _internal_set_width(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000200U);
+  // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.width)
+}
+inline double CreatePrimBroadcast::_internal_width() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.width_;
+}
+inline void CreatePrimBroadcast::_internal_set_width(double value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.width_ = value;
+}
+
+// optional double length = 9;
+inline bool CreatePrimBroadcast::has_length() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000400U);
+  return value;
+}
+inline void CreatePrimBroadcast::clear_length() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.length_ = 0;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000400U);
+}
+inline double CreatePrimBroadcast::length() const {
+  // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.length)
+  return _internal_length();
+}
+inline void CreatePrimBroadcast::set_length(double value) {
+  _internal_set_length(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000400U);
+  // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.length)
+}
+inline double CreatePrimBroadcast::_internal_length() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.length_;
+}
+inline void CreatePrimBroadcast::_internal_set_length(double value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.length_ = value;
+}
+
+// optional .idtxcore.PrimRefType ref_type = 10;
 inline bool CreatePrimBroadcast::has_ref_type() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000080U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
   return value;
 }
 inline void CreatePrimBroadcast::clear_ref_type() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.ref_type_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000080U);
+                  0x00000100U);
 }
 inline ::idtxcore::PrimRefType CreatePrimBroadcast::ref_type() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.ref_type)
@@ -2037,7 +2122,7 @@ inline ::idtxcore::PrimRefType CreatePrimBroadcast::ref_type() const {
 }
 inline void CreatePrimBroadcast::set_ref_type(::idtxcore::PrimRefType value) {
   _internal_set_ref_type(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.ref_type)
 }
 inline ::idtxcore::PrimRefType CreatePrimBroadcast::_internal_ref_type() const {
@@ -2049,7 +2134,7 @@ inline void CreatePrimBroadcast::_internal_set_ref_type(::idtxcore::PrimRefType 
   _impl_.ref_type_ = value;
 }
 
-// optional string reference_path = 9;
+// optional string reference_path = 11;
 inline bool CreatePrimBroadcast::has_reference_path() const {
   bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000008U);
   return value;
@@ -2118,7 +2203,7 @@ inline void CreatePrimBroadcast::set_allocated_reference_path(::std::string* PRO
   // @@protoc_insertion_point(field_set_allocated:idtxcore.CreatePrimBroadcast.reference_path)
 }
 
-// .idtxcore.SeparateTransform seperate = 10;
+// .idtxcore.SeparateTransform seperate = 12;
 inline bool CreatePrimBroadcast::has_seperate() const {
   return world_transform_case() == kSeperate;
 }
@@ -2189,7 +2274,7 @@ inline ::idtxcore::SeparateTransform* PROTOBUF_NONNULL CreatePrimBroadcast::muta
   return _msg;
 }
 
-// .idtxcore.Matrix4dTransform matrix = 11;
+// .idtxcore.Matrix4dTransform matrix = 13;
 inline bool CreatePrimBroadcast::has_matrix() const {
   return world_transform_case() == kMatrix;
 }

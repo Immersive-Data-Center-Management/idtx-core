@@ -185,6 +185,8 @@ std::string SerializeCreatePrimBroadcast(const Session& session,
     if (prim.has_height) bcast->set_height(prim.height);
     if (prim.has_radius) bcast->set_radius(prim.radius);
     if (prim.has_axis)   bcast->set_axis(prim.axis);
+    if (prim.has_width)  bcast->set_width(prim.width);
+    if (prim.has_length) bcast->set_length(prim.length);
     if (prim.has_ref)
     {
         bcast->set_ref_type(prim.ref_type);
