@@ -659,10 +659,10 @@ class CreatePrimRequest final : public ::google::protobuf::Message
     return *reinterpret_cast<const CreatePrimRequest*>(
         &_CreatePrimRequest_default_instance_);
   }
-  enum WorldTransformCase {
+  enum TransformCase {
     kSeperate = 6,
     kMatrix = 7,
-    WORLD_TRANSFORM_NOT_SET = 0,
+    TRANSFORM_NOT_SET = 0,
   };
   static constexpr int kIndexInFileMessages = 0;
   friend void swap(CreatePrimRequest& a, CreatePrimRequest& b) { a.Swap(&b); }
@@ -864,15 +864,15 @@ class CreatePrimRequest final : public ::google::protobuf::Message
   ::idtxcore::Matrix4dTransform* PROTOBUF_NONNULL _internal_mutable_matrix();
 
   public:
-  void clear_world_transform();
-  WorldTransformCase world_transform_case() const;
+  void clear_transform();
+  TransformCase transform_case() const;
   // @@protoc_insertion_point(class_scope:idtxcore.CreatePrimRequest)
  private:
   class _Internal;
   void set_has_seperate();
   void set_has_matrix();
-  inline bool has_world_transform() const;
-  inline void clear_has_world_transform();
+  inline bool has_transform() const;
+  inline void clear_has_transform();
   friend class ::google::protobuf::internal::TcParser;
   static const ::google::protobuf::internal::TcParseTable<3, 7,
                                    2, 70,
@@ -901,12 +901,12 @@ class CreatePrimRequest final : public ::google::protobuf::Message
     ::google::protobuf::internal::ArenaStringPtr reference_path_;
     int type_;
     int ref_type_;
-    union WorldTransformUnion {
-      constexpr WorldTransformUnion() : _constinit_{} {}
+    union TransformUnion {
+      constexpr TransformUnion() : _constinit_{} {}
       ::google::protobuf::internal::ConstantInitialized _constinit_;
       ::idtxcore::SeparateTransform* PROTOBUF_NULLABLE seperate_;
       ::idtxcore::Matrix4dTransform* PROTOBUF_NULLABLE matrix_;
-    } world_transform_;
+    } transform_;
     ::uint32_t _oneof_case_[1];
     PROTOBUF_TSAN_DECLARE_MEMBER
   };
@@ -972,10 +972,10 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
     return *reinterpret_cast<const CreatePrimBroadcast*>(
         &_CreatePrimBroadcast_default_instance_);
   }
-  enum WorldTransformCase {
+  enum TransformCase {
     kSeperate = 12,
     kMatrix = 13,
-    WORLD_TRANSFORM_NOT_SET = 0,
+    TRANSFORM_NOT_SET = 0,
   };
   static constexpr int kIndexInFileMessages = 1;
   friend void swap(CreatePrimBroadcast& a, CreatePrimBroadcast& b) { a.Swap(&b); }
@@ -1254,15 +1254,15 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
   ::idtxcore::Matrix4dTransform* PROTOBUF_NONNULL _internal_mutable_matrix();
 
   public:
-  void clear_world_transform();
-  WorldTransformCase world_transform_case() const;
+  void clear_transform();
+  TransformCase transform_case() const;
   // @@protoc_insertion_point(class_scope:idtxcore.CreatePrimBroadcast)
  private:
   class _Internal;
   void set_has_seperate();
   void set_has_matrix();
-  inline bool has_world_transform() const;
-  inline void clear_has_world_transform();
+  inline bool has_transform() const;
+  inline void clear_has_transform();
   friend class ::google::protobuf::internal::TcParser;
   static const ::google::protobuf::internal::TcParseTable<4, 13,
                                    2, 83,
@@ -1297,12 +1297,12 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
     int ref_type_;
     double width_;
     double length_;
-    union WorldTransformUnion {
-      constexpr WorldTransformUnion() : _constinit_{} {}
+    union TransformUnion {
+      constexpr TransformUnion() : _constinit_{} {}
       ::google::protobuf::internal::ConstantInitialized _constinit_;
       ::idtxcore::SeparateTransform* PROTOBUF_NULLABLE seperate_;
       ::idtxcore::Matrix4dTransform* PROTOBUF_NULLABLE matrix_;
-    } world_transform_;
+    } transform_;
     ::uint32_t _oneof_case_[1];
     PROTOBUF_TSAN_DECLARE_MEMBER
   };
@@ -1583,30 +1583,30 @@ inline void CreatePrimRequest::set_allocated_reference_path(::std::string* PROTO
 
 // .idtxcore.SeparateTransform seperate = 6;
 inline bool CreatePrimRequest::has_seperate() const {
-  return world_transform_case() == kSeperate;
+  return transform_case() == kSeperate;
 }
 inline bool CreatePrimRequest::_internal_has_seperate() const {
-  return world_transform_case() == kSeperate;
+  return transform_case() == kSeperate;
 }
 inline void CreatePrimRequest::set_has_seperate() {
   _impl_._oneof_case_[0] = kSeperate;
 }
 inline ::idtxcore::SeparateTransform* PROTOBUF_NULLABLE CreatePrimRequest::release_seperate() {
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimRequest.seperate)
-  if (world_transform_case() == kSeperate) {
-    clear_has_world_transform();
-    auto* temp = _impl_.world_transform_.seperate_;
+  if (transform_case() == kSeperate) {
+    clear_has_transform();
+    auto* temp = _impl_.transform_.seperate_;
     if (GetArena() != nullptr) {
       temp = ::google::protobuf::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.world_transform_.seperate_ = nullptr;
+    _impl_.transform_.seperate_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
 inline const ::idtxcore::SeparateTransform& CreatePrimRequest::_internal_seperate() const {
-  return world_transform_case() == kSeperate ? static_cast<const ::idtxcore::SeparateTransform&>(*_impl_.world_transform_.seperate_)
+  return transform_case() == kSeperate ? static_cast<const ::idtxcore::SeparateTransform&>(*_impl_.transform_.seperate_)
                      : reinterpret_cast<const ::idtxcore::SeparateTransform&>(::idtxcore::_SeparateTransform_default_instance_);
 }
 inline const ::idtxcore::SeparateTransform& CreatePrimRequest::seperate() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -1615,10 +1615,10 @@ inline const ::idtxcore::SeparateTransform& CreatePrimRequest::seperate() const 
 }
 inline ::idtxcore::SeparateTransform* PROTOBUF_NULLABLE CreatePrimRequest::unsafe_arena_release_seperate() {
   // @@protoc_insertion_point(field_unsafe_arena_release:idtxcore.CreatePrimRequest.seperate)
-  if (world_transform_case() == kSeperate) {
-    clear_has_world_transform();
-    auto* temp = _impl_.world_transform_.seperate_;
-    _impl_.world_transform_.seperate_ = nullptr;
+  if (transform_case() == kSeperate) {
+    clear_has_transform();
+    auto* temp = _impl_.transform_.seperate_;
+    _impl_.transform_.seperate_ = nullptr;
     return temp;
   } else {
     return nullptr;
@@ -1629,21 +1629,21 @@ inline void CreatePrimRequest::unsafe_arena_set_allocated_seperate(
   // We rely on the oneof clear method to free the earlier contents
   // of this oneof. We can directly use the pointer we're given to
   // set the new value.
-  clear_world_transform();
+  clear_transform();
   if (value) {
     set_has_seperate();
-    _impl_.world_transform_.seperate_ = value;
+    _impl_.transform_.seperate_ = value;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:idtxcore.CreatePrimRequest.seperate)
 }
 inline ::idtxcore::SeparateTransform* PROTOBUF_NONNULL CreatePrimRequest::_internal_mutable_seperate() {
-  if (world_transform_case() != kSeperate) {
-    clear_world_transform();
+  if (transform_case() != kSeperate) {
+    clear_transform();
     set_has_seperate();
-    _impl_.world_transform_.seperate_ = 
+    _impl_.transform_.seperate_ = 
         ::google::protobuf::Message::DefaultConstruct<::idtxcore::SeparateTransform>(GetArena());
   }
-  return _impl_.world_transform_.seperate_;
+  return _impl_.transform_.seperate_;
 }
 inline ::idtxcore::SeparateTransform* PROTOBUF_NONNULL CreatePrimRequest::mutable_seperate()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -1654,30 +1654,30 @@ inline ::idtxcore::SeparateTransform* PROTOBUF_NONNULL CreatePrimRequest::mutabl
 
 // .idtxcore.Matrix4dTransform matrix = 7;
 inline bool CreatePrimRequest::has_matrix() const {
-  return world_transform_case() == kMatrix;
+  return transform_case() == kMatrix;
 }
 inline bool CreatePrimRequest::_internal_has_matrix() const {
-  return world_transform_case() == kMatrix;
+  return transform_case() == kMatrix;
 }
 inline void CreatePrimRequest::set_has_matrix() {
   _impl_._oneof_case_[0] = kMatrix;
 }
 inline ::idtxcore::Matrix4dTransform* PROTOBUF_NULLABLE CreatePrimRequest::release_matrix() {
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimRequest.matrix)
-  if (world_transform_case() == kMatrix) {
-    clear_has_world_transform();
-    auto* temp = _impl_.world_transform_.matrix_;
+  if (transform_case() == kMatrix) {
+    clear_has_transform();
+    auto* temp = _impl_.transform_.matrix_;
     if (GetArena() != nullptr) {
       temp = ::google::protobuf::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.world_transform_.matrix_ = nullptr;
+    _impl_.transform_.matrix_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
 inline const ::idtxcore::Matrix4dTransform& CreatePrimRequest::_internal_matrix() const {
-  return world_transform_case() == kMatrix ? static_cast<const ::idtxcore::Matrix4dTransform&>(*_impl_.world_transform_.matrix_)
+  return transform_case() == kMatrix ? static_cast<const ::idtxcore::Matrix4dTransform&>(*_impl_.transform_.matrix_)
                      : reinterpret_cast<const ::idtxcore::Matrix4dTransform&>(::idtxcore::_Matrix4dTransform_default_instance_);
 }
 inline const ::idtxcore::Matrix4dTransform& CreatePrimRequest::matrix() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -1686,10 +1686,10 @@ inline const ::idtxcore::Matrix4dTransform& CreatePrimRequest::matrix() const AB
 }
 inline ::idtxcore::Matrix4dTransform* PROTOBUF_NULLABLE CreatePrimRequest::unsafe_arena_release_matrix() {
   // @@protoc_insertion_point(field_unsafe_arena_release:idtxcore.CreatePrimRequest.matrix)
-  if (world_transform_case() == kMatrix) {
-    clear_has_world_transform();
-    auto* temp = _impl_.world_transform_.matrix_;
-    _impl_.world_transform_.matrix_ = nullptr;
+  if (transform_case() == kMatrix) {
+    clear_has_transform();
+    auto* temp = _impl_.transform_.matrix_;
+    _impl_.transform_.matrix_ = nullptr;
     return temp;
   } else {
     return nullptr;
@@ -1700,21 +1700,21 @@ inline void CreatePrimRequest::unsafe_arena_set_allocated_matrix(
   // We rely on the oneof clear method to free the earlier contents
   // of this oneof. We can directly use the pointer we're given to
   // set the new value.
-  clear_world_transform();
+  clear_transform();
   if (value) {
     set_has_matrix();
-    _impl_.world_transform_.matrix_ = value;
+    _impl_.transform_.matrix_ = value;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:idtxcore.CreatePrimRequest.matrix)
 }
 inline ::idtxcore::Matrix4dTransform* PROTOBUF_NONNULL CreatePrimRequest::_internal_mutable_matrix() {
-  if (world_transform_case() != kMatrix) {
-    clear_world_transform();
+  if (transform_case() != kMatrix) {
+    clear_transform();
     set_has_matrix();
-    _impl_.world_transform_.matrix_ = 
+    _impl_.transform_.matrix_ = 
         ::google::protobuf::Message::DefaultConstruct<::idtxcore::Matrix4dTransform>(GetArena());
   }
-  return _impl_.world_transform_.matrix_;
+  return _impl_.transform_.matrix_;
 }
 inline ::idtxcore::Matrix4dTransform* PROTOBUF_NONNULL CreatePrimRequest::mutable_matrix()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -1723,14 +1723,14 @@ inline ::idtxcore::Matrix4dTransform* PROTOBUF_NONNULL CreatePrimRequest::mutabl
   return _msg;
 }
 
-inline bool CreatePrimRequest::has_world_transform() const {
-  return world_transform_case() != WORLD_TRANSFORM_NOT_SET;
+inline bool CreatePrimRequest::has_transform() const {
+  return transform_case() != TRANSFORM_NOT_SET;
 }
-inline void CreatePrimRequest::clear_has_world_transform() {
-  _impl_._oneof_case_[0] = WORLD_TRANSFORM_NOT_SET;
+inline void CreatePrimRequest::clear_has_transform() {
+  _impl_._oneof_case_[0] = TRANSFORM_NOT_SET;
 }
-inline CreatePrimRequest::WorldTransformCase CreatePrimRequest::world_transform_case() const {
-  return CreatePrimRequest::WorldTransformCase(_impl_._oneof_case_[0]);
+inline CreatePrimRequest::TransformCase CreatePrimRequest::transform_case() const {
+  return CreatePrimRequest::TransformCase(_impl_._oneof_case_[0]);
 }
 // -------------------------------------------------------------------
 
@@ -2205,30 +2205,30 @@ inline void CreatePrimBroadcast::set_allocated_reference_path(::std::string* PRO
 
 // .idtxcore.SeparateTransform seperate = 12;
 inline bool CreatePrimBroadcast::has_seperate() const {
-  return world_transform_case() == kSeperate;
+  return transform_case() == kSeperate;
 }
 inline bool CreatePrimBroadcast::_internal_has_seperate() const {
-  return world_transform_case() == kSeperate;
+  return transform_case() == kSeperate;
 }
 inline void CreatePrimBroadcast::set_has_seperate() {
   _impl_._oneof_case_[0] = kSeperate;
 }
 inline ::idtxcore::SeparateTransform* PROTOBUF_NULLABLE CreatePrimBroadcast::release_seperate() {
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimBroadcast.seperate)
-  if (world_transform_case() == kSeperate) {
-    clear_has_world_transform();
-    auto* temp = _impl_.world_transform_.seperate_;
+  if (transform_case() == kSeperate) {
+    clear_has_transform();
+    auto* temp = _impl_.transform_.seperate_;
     if (GetArena() != nullptr) {
       temp = ::google::protobuf::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.world_transform_.seperate_ = nullptr;
+    _impl_.transform_.seperate_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
 inline const ::idtxcore::SeparateTransform& CreatePrimBroadcast::_internal_seperate() const {
-  return world_transform_case() == kSeperate ? static_cast<const ::idtxcore::SeparateTransform&>(*_impl_.world_transform_.seperate_)
+  return transform_case() == kSeperate ? static_cast<const ::idtxcore::SeparateTransform&>(*_impl_.transform_.seperate_)
                      : reinterpret_cast<const ::idtxcore::SeparateTransform&>(::idtxcore::_SeparateTransform_default_instance_);
 }
 inline const ::idtxcore::SeparateTransform& CreatePrimBroadcast::seperate() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -2237,10 +2237,10 @@ inline const ::idtxcore::SeparateTransform& CreatePrimBroadcast::seperate() cons
 }
 inline ::idtxcore::SeparateTransform* PROTOBUF_NULLABLE CreatePrimBroadcast::unsafe_arena_release_seperate() {
   // @@protoc_insertion_point(field_unsafe_arena_release:idtxcore.CreatePrimBroadcast.seperate)
-  if (world_transform_case() == kSeperate) {
-    clear_has_world_transform();
-    auto* temp = _impl_.world_transform_.seperate_;
-    _impl_.world_transform_.seperate_ = nullptr;
+  if (transform_case() == kSeperate) {
+    clear_has_transform();
+    auto* temp = _impl_.transform_.seperate_;
+    _impl_.transform_.seperate_ = nullptr;
     return temp;
   } else {
     return nullptr;
@@ -2251,21 +2251,21 @@ inline void CreatePrimBroadcast::unsafe_arena_set_allocated_seperate(
   // We rely on the oneof clear method to free the earlier contents
   // of this oneof. We can directly use the pointer we're given to
   // set the new value.
-  clear_world_transform();
+  clear_transform();
   if (value) {
     set_has_seperate();
-    _impl_.world_transform_.seperate_ = value;
+    _impl_.transform_.seperate_ = value;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:idtxcore.CreatePrimBroadcast.seperate)
 }
 inline ::idtxcore::SeparateTransform* PROTOBUF_NONNULL CreatePrimBroadcast::_internal_mutable_seperate() {
-  if (world_transform_case() != kSeperate) {
-    clear_world_transform();
+  if (transform_case() != kSeperate) {
+    clear_transform();
     set_has_seperate();
-    _impl_.world_transform_.seperate_ = 
+    _impl_.transform_.seperate_ = 
         ::google::protobuf::Message::DefaultConstruct<::idtxcore::SeparateTransform>(GetArena());
   }
-  return _impl_.world_transform_.seperate_;
+  return _impl_.transform_.seperate_;
 }
 inline ::idtxcore::SeparateTransform* PROTOBUF_NONNULL CreatePrimBroadcast::mutable_seperate()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -2276,30 +2276,30 @@ inline ::idtxcore::SeparateTransform* PROTOBUF_NONNULL CreatePrimBroadcast::muta
 
 // .idtxcore.Matrix4dTransform matrix = 13;
 inline bool CreatePrimBroadcast::has_matrix() const {
-  return world_transform_case() == kMatrix;
+  return transform_case() == kMatrix;
 }
 inline bool CreatePrimBroadcast::_internal_has_matrix() const {
-  return world_transform_case() == kMatrix;
+  return transform_case() == kMatrix;
 }
 inline void CreatePrimBroadcast::set_has_matrix() {
   _impl_._oneof_case_[0] = kMatrix;
 }
 inline ::idtxcore::Matrix4dTransform* PROTOBUF_NULLABLE CreatePrimBroadcast::release_matrix() {
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimBroadcast.matrix)
-  if (world_transform_case() == kMatrix) {
-    clear_has_world_transform();
-    auto* temp = _impl_.world_transform_.matrix_;
+  if (transform_case() == kMatrix) {
+    clear_has_transform();
+    auto* temp = _impl_.transform_.matrix_;
     if (GetArena() != nullptr) {
       temp = ::google::protobuf::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.world_transform_.matrix_ = nullptr;
+    _impl_.transform_.matrix_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
 inline const ::idtxcore::Matrix4dTransform& CreatePrimBroadcast::_internal_matrix() const {
-  return world_transform_case() == kMatrix ? static_cast<const ::idtxcore::Matrix4dTransform&>(*_impl_.world_transform_.matrix_)
+  return transform_case() == kMatrix ? static_cast<const ::idtxcore::Matrix4dTransform&>(*_impl_.transform_.matrix_)
                      : reinterpret_cast<const ::idtxcore::Matrix4dTransform&>(::idtxcore::_Matrix4dTransform_default_instance_);
 }
 inline const ::idtxcore::Matrix4dTransform& CreatePrimBroadcast::matrix() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -2308,10 +2308,10 @@ inline const ::idtxcore::Matrix4dTransform& CreatePrimBroadcast::matrix() const 
 }
 inline ::idtxcore::Matrix4dTransform* PROTOBUF_NULLABLE CreatePrimBroadcast::unsafe_arena_release_matrix() {
   // @@protoc_insertion_point(field_unsafe_arena_release:idtxcore.CreatePrimBroadcast.matrix)
-  if (world_transform_case() == kMatrix) {
-    clear_has_world_transform();
-    auto* temp = _impl_.world_transform_.matrix_;
-    _impl_.world_transform_.matrix_ = nullptr;
+  if (transform_case() == kMatrix) {
+    clear_has_transform();
+    auto* temp = _impl_.transform_.matrix_;
+    _impl_.transform_.matrix_ = nullptr;
     return temp;
   } else {
     return nullptr;
@@ -2322,21 +2322,21 @@ inline void CreatePrimBroadcast::unsafe_arena_set_allocated_matrix(
   // We rely on the oneof clear method to free the earlier contents
   // of this oneof. We can directly use the pointer we're given to
   // set the new value.
-  clear_world_transform();
+  clear_transform();
   if (value) {
     set_has_matrix();
-    _impl_.world_transform_.matrix_ = value;
+    _impl_.transform_.matrix_ = value;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:idtxcore.CreatePrimBroadcast.matrix)
 }
 inline ::idtxcore::Matrix4dTransform* PROTOBUF_NONNULL CreatePrimBroadcast::_internal_mutable_matrix() {
-  if (world_transform_case() != kMatrix) {
-    clear_world_transform();
+  if (transform_case() != kMatrix) {
+    clear_transform();
     set_has_matrix();
-    _impl_.world_transform_.matrix_ = 
+    _impl_.transform_.matrix_ = 
         ::google::protobuf::Message::DefaultConstruct<::idtxcore::Matrix4dTransform>(GetArena());
   }
-  return _impl_.world_transform_.matrix_;
+  return _impl_.transform_.matrix_;
 }
 inline ::idtxcore::Matrix4dTransform* PROTOBUF_NONNULL CreatePrimBroadcast::mutable_matrix()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -2345,14 +2345,14 @@ inline ::idtxcore::Matrix4dTransform* PROTOBUF_NONNULL CreatePrimBroadcast::muta
   return _msg;
 }
 
-inline bool CreatePrimBroadcast::has_world_transform() const {
-  return world_transform_case() != WORLD_TRANSFORM_NOT_SET;
+inline bool CreatePrimBroadcast::has_transform() const {
+  return transform_case() != TRANSFORM_NOT_SET;
 }
-inline void CreatePrimBroadcast::clear_has_world_transform() {
-  _impl_._oneof_case_[0] = WORLD_TRANSFORM_NOT_SET;
+inline void CreatePrimBroadcast::clear_has_transform() {
+  _impl_._oneof_case_[0] = TRANSFORM_NOT_SET;
 }
-inline CreatePrimBroadcast::WorldTransformCase CreatePrimBroadcast::world_transform_case() const {
-  return CreatePrimBroadcast::WorldTransformCase(_impl_._oneof_case_[0]);
+inline CreatePrimBroadcast::TransformCase CreatePrimBroadcast::transform_case() const {
+  return CreatePrimBroadcast::TransformCase(_impl_._oneof_case_[0]);
 }
 // -------------------------------------------------------------------
 

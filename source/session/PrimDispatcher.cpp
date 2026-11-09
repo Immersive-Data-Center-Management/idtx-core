@@ -36,7 +36,6 @@
 #include <pxr/usd/usdGeom/sphere.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xform.h>
-#include <pxr/usd/usdGeom/xformCache.h>
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/xformOp.h>
 
@@ -142,13 +141,13 @@ bool AuthorPrim(const pxr::UsdStageRefPtr& stage,
     return static_cast<bool>(stage->DefinePrim(path, type_name));
 }
 
-// Build the world-space GfMatrix4d carried by @p req. Returns false when the
+// Build the LOCAL GfMatrix4d carried by @p req. Returns false when the
 // request carries no transform. A Matrix4dTransform is loaded verbatim (same
 // row ordering ApplyMatrix uses); a SeparateTransform is composed scale ->
 // rotateXYZ -> translate via GfTransform, matching UsdGeomXformCommonAPI's
 // RotationOrderXYZ convention (verified by PrimDispatcherTests). Uses the
 // per-field has_* accessors so it is independent of the oneof's name.
-bool WorldMatrixFromRequest(const idtxcore::CreatePrimRequest& req, pxr::GfMatrix4d& out)
+bool LocalMatrixFromRequest(const idtxcore::CreatePrimRequest& req, pxr::GfMatrix4d& out)
 {
     if (req.has_matrix())
     {
@@ -179,23 +178,16 @@ bool WorldMatrixFromRequest(const idtxcore::CreatePrimRequest& req, pxr::GfMatri
     return false;
 }
 
-// Author @p world_matrix as the LOCAL transform of @p prim relative to
-// @p parent_prim: local = world * parentWorld^-1. The parent's world transform
-// is resolved from the composed stage (identity for the pseudo-root). Authored
-// as a single matrix xformOp:transform so it round-trips through
-// TransformDispatcher::ReadAuthoredLocalTransform. Returns false if the prim is
-// not xformable (e.g. a reference to a non-xformable prim); callers treat that
-// as non-fatal.
-bool AuthorLocalTransformFromWorld(const pxr::UsdPrim& prim,
-                                   const pxr::UsdPrim& parent_prim,
-                                   const pxr::GfMatrix4d& world_matrix)
+// Author @p local_matrix as the LOCAL transform of @p prim relative to its
+// parent, verbatim. Authored as a single matrix xformOp:transform so it
+// round-trips through TransformDispatcher::ReadAuthoredLocalTransform. Returns
+// false if the prim is not xformable (e.g. a reference to a non-xformable
+// prim); callers treat that as non-fatal.
+bool AuthorLocalTransform(const pxr::UsdPrim& prim,
+                          const pxr::GfMatrix4d& local_matrix)
 {
     pxr::UsdGeomXformable xformable(prim);
     if (!xformable) return false;
-
-    pxr::UsdGeomXformCache cache;
-    const pxr::GfMatrix4d parent_world = cache.GetLocalToWorldTransform(parent_prim);
-    const pxr::GfMatrix4d local = world_matrix * parent_world.GetInverse();
 
     // No SdfChangeBlock: this is Usd-level authoring (SetXformOpOrder /
     // AddTransformOp read the composed op order), which USD advises against
@@ -204,7 +196,7 @@ bool AuthorLocalTransformFromWorld(const pxr::UsdPrim& prim,
     xformable.SetXformOpOrder({}, /*resetXformStack=*/false);
     pxr::UsdGeomXformOp op = xformable.AddTransformOp(pxr::UsdGeomXformOp::PrecisionDouble);
     if (!op) return false;
-    op.Set(local);
+    op.Set(local_matrix);
     return true;
 }
 
@@ -501,13 +493,13 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
             ReadAttributes(stage->GetPrimAtPath(child), type, out);
         }
 
-        // Optional world-space transform: author it as the prim's local
+        // Optional local transform: author it verbatim as the prim's local
         // transform relative to its parent. Applies to every prim type.
-        pxr::GfMatrix4d world;
-        if (WorldMatrixFromRequest(req, world))
+        pxr::GfMatrix4d local;
+        if (LocalMatrixFromRequest(req, local))
         {
             const pxr::UsdPrim prim = stage->GetPrimAtPath(child);
-            if (!AuthorLocalTransformFromWorld(prim, parent_prim, world))
+            if (!AuthorLocalTransform(prim, local))
             {
                 IDTX_LOG(IDTX_WARN,
                          "CreatePrimRequest carried a transform but '{}' is not xformable; "

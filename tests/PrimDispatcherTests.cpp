@@ -1,11 +1,11 @@
 // tests/PrimDispatcherTests.cpp
 //
-// Stage-level unit tests of PrimDispatcher::Create's world->local transform
+// Stage-level unit tests of PrimDispatcher::Create's local transform
 // handling. These use an in-memory UsdStage (no server, no files) and assert
-// the created prim's COMPOSED world transform equals the requested world, which
-// is the contract: the client sends world, the server authors local relative to
-// the parent. The reference-path behaviour is covered by
-// ReferencePathResolverTests and WebSocketTests.
+// the created prim's authored LOCAL transform equals the requested transform,
+// which is the contract: the client sends a local transform and the server
+// authors it verbatim relative to the parent. The reference-path behaviour is
+// covered by ReferencePathResolverTests and WebSocketTests.
 
 #include "thirdparty/doctest/doctest.h"
 
@@ -48,7 +48,7 @@ bool MatrixApprox(const pxr::GfMatrix4d& a, const pxr::GfMatrix4d& b, double eps
 
 } // namespace
 
-TEST_CASE("Create authors local transform so composed world matches the request (matrix, non-identity parent)")
+TEST_CASE("Create authors the request transform as the prim's local transform (matrix, non-identity parent)")
 {
     auto stage = pxr::UsdStage::CreateInMemory();
     auto parent = pxr::UsdGeomXform::Define(stage, pxr::SdfPath("/Parent"));
@@ -56,7 +56,7 @@ TEST_CASE("Create authors local transform so composed world matches the request 
     // Move the parent so parentWorld is non-identity.
     pxr::UsdGeomXformCommonAPI(parent.GetPrim()).SetTranslate(pxr::GfVec3d(10.0, 20.0, 30.0));
 
-    // Requested world transform: translate(1,2,3) as a matrix (translation in
+    // Requested LOCAL transform: translate(1,2,3) as a matrix (translation in
     // the last row, row-vector convention).
     idtxcore::CreatePrimRequest req;
     req.set_parent_path("/Parent");
@@ -70,8 +70,10 @@ TEST_CASE("Create authors local transform so composed world matches the request 
     CreatedPrim out;
     REQUIRE(PrimDispatcher::Create(stage, req, /*uploads_root=*/"", out));
 
+    // The transform is authored verbatim as the prim's LOCAL transform, so the
+    // composed world is the parent's world composed with it: (10,20,30)+(1,2,3).
     pxr::GfMatrix4d expected(1.0);
-    expected.SetTranslateOnly(pxr::GfVec3d(1.0, 2.0, 3.0));
+    expected.SetTranslateOnly(pxr::GfVec3d(11.0, 22.0, 33.0));
     CHECK(MatrixApprox(WorldOf(stage, out.prim_path), expected));
 }
 

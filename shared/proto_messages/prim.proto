@@ -41,9 +41,11 @@ message CreatePrimRequest {
   PrimType type = 3;
   optional PrimRefType ref_type = 4;
   optional string reference_path = 5;
-  oneof world_transform {
+  // Optional LOCAL transform of the new prim relative to its parent. Authored
+  // verbatim as the prim's local xformOp (no world->local conversion).
+  oneof transform {
     SeparateTransform seperate = 6;
-    Matrix4dTransform matrix = 7;  
+    Matrix4dTransform matrix = 7;
   }
 }
 
@@ -73,8 +75,8 @@ message CreatePrimBroadcast {
   optional PrimRefType ref_type = 10;
   // The reference path as relative to the stage the reference is embedded into
   optional string reference_path = 11;
-  // The optional transform of the prim
-  oneof world_transform {
+  // The optional LOCAL transform of the prim relative to its parent
+  oneof transform {
     SeparateTransform seperate = 12;
     Matrix4dTransform matrix = 13;
   }

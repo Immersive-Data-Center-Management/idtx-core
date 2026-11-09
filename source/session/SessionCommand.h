@@ -108,7 +108,7 @@ struct JoinCommand
  *
  * The consumer authors the prim described by @c request under its parent path
  * into the session layer — a built-in typed gprim/xform, or a typeless
- * reference/payload prim — optionally placed by the request's world-space
+ * reference/payload prim — optionally placed by the request's local
  * transform, assigns it a unique name, broadcasts the creation to every client
  * (including @c origin) and sends @c origin an Ack carrying @c request_id. The
  * request is owned via a unique_ptr so the command stays nothrow-movable as the

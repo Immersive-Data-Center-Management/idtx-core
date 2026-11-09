@@ -38,7 +38,7 @@ std::string BuildCreatePrimRequest(const std::string& session_id,
                                    idtxcore::PrimType type,
                                    std::uint64_t request_id = 0);
 
-/// As BuildCreatePrimRequest, but also carries a world-space SeparateTransform
+/// As BuildCreatePrimRequest, but also carries a local SeparateTransform
 /// with the given translation (rotation identity, scale 1).
 std::string BuildCreatePrimRequestWithTranslate(const std::string& session_id,
                                                 const std::string& parent_path,

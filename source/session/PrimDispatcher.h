@@ -74,8 +74,8 @@ public:
      *   - a built-in typed prim (Cube/Sphere/Cone/Cylinder/Capsule/Plane/Xform),
      *     or a typeless PRIM_TYPE_REF prim carrying a reference or payload arc
      *     (@c ref_type) to @c reference_path;
-     *   - an optional world-space transform, converted to the prim's local
-     *     transform relative to its parent before authoring.
+     *   - an optional local transform, authored verbatim as the prim's local
+     *     transform relative to its parent.
      *
      * Validation (all checked before anything is authored, so a failure leaves
      * the stage untouched):

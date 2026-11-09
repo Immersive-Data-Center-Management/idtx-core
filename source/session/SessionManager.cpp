@@ -163,7 +163,7 @@ bool BuildBroadcastPayload(const Session& session,
 // (created under @p parent_path with the given @p type) stamped with
 // @p server_seq. Only the attribute fields that apply to the type are set. For
 // a reference prim the arc kind and broadcast reference path are included. When
-// @p world_src is non-null, its world-space transform is echoed verbatim onto
+// @p transform_src is non-null, its local transform is echoed verbatim onto
 // the broadcast (the live-create path; the join snapshot omits it and conveys
 // position through a separate local xform frame instead).
 std::string SerializeCreatePrimBroadcast(const Session& session,
@@ -171,7 +171,7 @@ std::string SerializeCreatePrimBroadcast(const Session& session,
                                          idtxcore::PrimType type,
                                          const CreatedPrim& prim,
                                          std::uint64_t server_seq,
-                                         const idtxcore::CreatePrimRequest* world_src = nullptr)
+                                         const idtxcore::CreatePrimRequest* transform_src = nullptr)
 {
     idtxcore::BaseMessage msg;
     msg.set_session_id(session.id);
@@ -193,14 +193,14 @@ std::string SerializeCreatePrimBroadcast(const Session& session,
         bcast->set_reference_path(prim.reference_path);
     }
 
-    if (world_src)
+    if (transform_src)
     {
-        // Echo the request's world transform verbatim. Per-field has_*
+        // Echo the request's local transform verbatim. Per-field has_*
         // accessors keep this independent of the oneof's name.
-        if (world_src->has_seperate())
-            *bcast->mutable_seperate() = world_src->seperate();
-        else if (world_src->has_matrix())
-            *bcast->mutable_matrix() = world_src->matrix();
+        if (transform_src->has_seperate())
+            *bcast->mutable_seperate() = transform_src->seperate();
+        else if (transform_src->has_matrix())
+            *bcast->mutable_matrix() = transform_src->matrix();
     }
 
     std::string payload;
@@ -905,7 +905,7 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
 
     // It's required to broadcast the prim creation back to all clients, even the one, the command
     // was initiated by, as the prims are required to be created on the server first. The client
-    // follows and only creates based on this message. The world-space transform (if any) is echoed
+    // follows and only creates based on this message. The local transform (if any) is echoed
     // verbatim so clients can place the prim themselves.
     const std::string payload =
         SerializeCreatePrimBroadcast(session, req.parent_path(), req.type(), created, seq, &req);

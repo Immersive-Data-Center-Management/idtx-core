@@ -438,7 +438,7 @@ TEST_CASE("create prim: an Xform may be nested under a gprim")
     CHECK(ack->ack().ok());
 }
 
-TEST_CASE("create prim honors a world transform and echoes it on the broadcast")
+TEST_CASE("create prim honors a local transform and echoes it on the broadcast")
 {
     TestServer server;
     server.WaitReady();
@@ -450,8 +450,8 @@ TEST_CASE("create prim honors a world transform and echoes it on the broadcast")
     REQUIRE(conn.handshake_ok);
     DrainHandshake(ws);
 
-    // /Root is at the origin, so the local transform authored for a child equals
-    // the requested world transform; here we assert the broadcast echoes world.
+    // The transform is authored verbatim as the child's local transform and the
+    // broadcast echoes it unchanged.
     ws.SendBinary(idtx::tests::BuildCreatePrimRequestWithTranslate(
         sid, "/Root", idtxcore::PRIM_TYPE_XFORM, 5.0, 6.0, 7.0, /*request_id=*/71));
 
