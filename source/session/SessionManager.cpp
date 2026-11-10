@@ -1538,6 +1538,9 @@ void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
             frames.push_back(SerializeSetPrimActiveBroadcast(session, path, /*active=*/false, seq));
     }
 
+    // Counted here: the terminal marker below may fail to serialize.
+    const std::size_t prim_frames = frames.size();
+
     // Terminal marker: the client now has the full server state as of seq.
     idtxcore::BaseMessage done;
     done.set_session_id(session.id);
@@ -1556,7 +1559,7 @@ void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
     }
 
     IDTX_LOG(IDTX_INFO, "Sent {} snapshot ({} prim frame(s)) to a client of session {}.",
-             command.request_id != 0 ? "requested" : "join", frames.size() - 1, session.id);
+             command.request_id != 0 ? "requested" : "join", prim_frames, session.id);
 }
 
 void SessionManager::HandleCommand(Session& session, CommitCommand& command)
