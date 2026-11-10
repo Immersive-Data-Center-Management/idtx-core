@@ -412,10 +412,12 @@ public:
 
     /// Server-relative URI clients download @p usd_file (uploads-relative)
     /// from. Shared by the Handshake and LayerReloaded so clients can match
-    /// the two.
+    /// the two. The path is percent-encoded, so a name with a space or
+    /// another reserved character still yields a valid URI.
     static std::string DownloadUri(const std::string& usd_file)
     {
-        return std::string("/api/v1/download/") + usd_file;
+        return std::string("/api/v1/download/")
+             + idtx::utils::UsdFileLocator::PercentEncodePath(usd_file);
     }
 
     /**

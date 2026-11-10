@@ -721,5 +721,22 @@ TEST_CASE("shared layer: sessions and LayerReloaded name a file canonically, "
         });
     REQUIRE(from_upload.has_value());
     CHECK(from_upload->layer_reloaded().usd_path() == "my asset.usda");
-    CHECK(from_upload->layer_reloaded().usd_uri() == "/api/v1/download/my asset.usda");
+    CHECK(from_upload->layer_reloaded().usd_uri() == "/api/v1/download/my%20asset.usda");
+
+    // The handshake encodes the name the same way, and the URI fetches the file.
+    {
+        WsTestClient ws;
+        auto conn = ws.Connect("127.0.0.1", server.port(), "/ws?sid=" + encoded_sid);
+        REQUIRE(conn.handshake_ok);
+        const auto hs = idtx::tests::WaitForMessage(
+            ws, std::chrono::milliseconds{5000},
+            [](const idtxcore::BaseMessage& m) {
+                return m.message_case() == idtxcore::BaseMessage::kHandshake;
+            });
+        REQUIRE(hs.has_value());
+        CHECK(hs->handshake().usd_path() == "my asset.usda");
+        CHECK(hs->handshake().usd_uri() == from_upload->layer_reloaded().usd_uri());
+    }
+    const auto download = http.Get(server.base_http_url() + from_upload->layer_reloaded().usd_uri());
+    CHECK(download.status == 200);
 }

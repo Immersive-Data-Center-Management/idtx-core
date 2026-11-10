@@ -118,3 +118,19 @@ TEST_CASE("locator: paths outside the uploads root have no canonical name")
     CHECK(Canonical(locator, uploads.root() / ".." / "outside.usda") == "<OutsideRoot>");
     CHECK(Canonical(locator, uploads.root()) == "<InvalidPath>");
 }
+
+TEST_CASE("locator: a percent-encoded path decodes back to the original")
+{
+    const auto round_trip = [](const std::string& path)
+    {
+        std::string decoded;
+        REQUIRE(UsdFileLocator::PercentDecode(UsdFileLocator::PercentEncodePath(path), decoded));
+        return decoded;
+    };
+
+    CHECK(UsdFileLocator::PercentEncodePath("dir/a-b_c.v~1.usda") == "dir/a-b_c.v~1.usda");
+    CHECK(UsdFileLocator::PercentEncodePath("my asset.usda") == "my%20asset.usda");
+    CHECK(UsdFileLocator::PercentEncodePath("a%b#c?d.usda") == "a%25b%23c%3Fd.usda");
+    CHECK(round_trip("my dir/my asset.usda") == "my dir/my asset.usda");
+    CHECK(round_trip("a%b#c?d+e.usda") == "a%b#c?d+e.usda");
+}

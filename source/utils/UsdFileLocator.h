@@ -456,6 +456,38 @@ public:
         return true;
     }
 
+    /**
+     * @brief Percent-encode a path for use in a URL, so PercentDecode()
+     *        returns it unchanged. Every byte outside the unreserved set
+     *        (letters, digits, '-', '.', '_', '~') is encoded, except '/',
+     *        which keeps separating the path segments.
+     */
+    static std::string PercentEncodePath(const std::string& path)
+    {
+        static constexpr char kHex[] = "0123456789ABCDEF";
+        std::string out;
+        out.reserve(path.size());
+        for (const char c : path)
+        {
+            const auto byte = static_cast<unsigned char>(c);
+            const bool keep = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z')
+                           || (byte >= '0' && byte <= '9')
+                           || byte == '-' || byte == '.' || byte == '_' || byte == '~'
+                           || byte == '/';
+            if (keep)
+            {
+                out.push_back(c);
+            }
+            else
+            {
+                out.push_back('%');
+                out.push_back(kHex[byte >> 4]);
+                out.push_back(kHex[byte & 0x0F]);
+            }
+        }
+        return out;
+    }
+
     static const char* StatusToString(Status s) noexcept
     {
         switch (s)
