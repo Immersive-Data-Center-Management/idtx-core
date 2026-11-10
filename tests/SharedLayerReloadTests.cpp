@@ -546,7 +546,8 @@ TEST_CASE("shared layer: a replacing upload waits for the file-write slot a comm
     REQUIRE(idtx::tests::ReadTranslate(cube, "/Root/Cube", x, y, z));
     CHECK(x == doctest::Approx(0.0)); // not written while the slot is held
 
-    // A new file cannot collide with a commit and does not wait.
+    // A new file cannot collide with a commit and does not wait, also when
+    // the client allows overwriting.
     {
         HttpTestClient http;
         const auto fresh = http.UploadMultipart(server.base_http_url() + "/api/v1/upload",
@@ -554,6 +555,22 @@ TEST_CASE("shared layer: a replacing upload waits for the file-write slot a comm
                                                 "fresh.usda", /*target_dir=*/"",
                                                 /*overwrite=*/false);
         CHECK(fresh.status == 201);
+        const auto fresh_overwrite = http.UploadMultipart(
+            server.base_http_url() + "/api/v1/upload",
+            idtx::tests::BuildCubeUsdaBytes(1.0, 1.0, 1.0),
+            "fresh_overwrite.usda", /*target_dir=*/"", /*overwrite=*/true);
+        CHECK(fresh_overwrite.status == 201);
+    }
+
+    // A second upload of the waiting upload's file is rejected right away
+    // instead of queueing behind it.
+    {
+        HttpTestClient http;
+        const auto second = http.UploadMultipart(server.base_http_url() + "/api/v1/upload",
+                                                 idtx::tests::BuildCubeUsdaBytes(5.0, 5.0, 5.0),
+                                                 "cube.usda", /*target_dir=*/"",
+                                                 /*overwrite=*/true);
+        CHECK(second.status == 503);
     }
 
     slot.reset();

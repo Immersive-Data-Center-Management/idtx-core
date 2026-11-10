@@ -78,6 +78,25 @@ idtx::utils::UsdFileLocator& FileServingController::Locator()
     return *m_locator_;
 }
 
+std::shared_ptr<void> FileServingController::ReserveUploadName(const std::string& relative_path,
+                                                               const std::filesystem::path& full_path,
+                                                               bool& out_exists)
+{
+    std::lock_guard lk(m_uploads_mutex_);
+    if (!m_uploads_in_progress_.insert(relative_path).second) return nullptr;
+
+    // Checked under the mutex, so no upload can rename its file into place
+    // between this check and the reservation.
+    std::error_code ec;
+    out_exists = std::filesystem::exists(full_path, ec);
+
+    return std::shared_ptr<void>(this, [this, relative_path](void*)
+    {
+        std::lock_guard release_lk(m_uploads_mutex_);
+        m_uploads_in_progress_.erase(relative_path);
+    });
+}
+
 // ---------------------------------------------------------------------------
 // File Serving
 // ---------------------------------------------------------------------------
@@ -269,15 +288,34 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                     idtx::utils::UsdFileLocator::StatusToString(vstatus));
         }
 
-        // An upload that may replace an existing file takes the session
-        // manager's file-write slot, which commits hold while they write a
-        // file and until it is reloaded. So an upload and a commit never write
-        // the same file at once, and neither reloads or flattens the other's
-        // half-finished state. Taken before the existence check below, so
-        // that check and the replacement happen under it. Released when this
-        // handler returns, or, after a replacement, once the reload is done.
+        // Only one upload of a name runs at a time: a second one is rejected
+        // instead of racing the first. The reservation also fixes whether
+        // the file exists until this upload has renamed its file into place,
+        // since no other upload can create or replace it meanwhile. That
+        // decides whether live sessions need to be told to reload.
+        bool target_existed_before = false;
+        const std::shared_ptr<void> reservation =
+            ReserveUploadName(relative_path.generic_string(), full_path, target_existed_before);
+        if (!reservation)
+        {
+            return idtx::dto::make_error(503, "unavailable",
+                "Another upload of this file is still in progress; retry later.");
+        }
+        if (target_existed_before && !overwrite)
+        {
+            return idtx::dto::make_error(409, "conflict",
+                "A file with the same name already exists. Set 'overwrite=true' to replace it.");
+        }
+
+        // Replacing an existing file takes the session manager's file-write
+        // slot, which commits hold while they write a file and until it is
+        // reloaded. So an upload and a commit never write the same file at
+        // once, and neither reloads or flattens the other's half-finished
+        // state. A new file needs no slot: no session can have opened it and
+        // no commit writes it. Released when this handler returns, or, after
+        // a replacement, once the reload is done.
         idtx::session::FileWriteSlot write_slot;
-        if (overwrite)
+        if (target_existed_before)
         {
             if (auto sm = m_session_manager_.lock())
             {
@@ -290,19 +328,7 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                 }
             }
         }
-
-        // Overwrite check (before mkdir so we don't churn the filesystem for
-        // rejected requests). We also remember whether the target existed
-        // before the rename so we know, after the write succeeds, whether
-        // this upload actually replaced an existing file — that's the only
-        // case in which live sessions need to be told to reload.
         std::error_code ec;
-        const bool target_existed_before = fs::exists(full_path, ec);
-        if (target_existed_before && !overwrite)
-        {
-            return idtx::dto::make_error(409, "conflict",
-                "A file with the same name already exists. Set 'overwrite=true' to replace it.");
-        }
 
         // Ensure the target directory exists and *is* still inside the root
         // after symlink resolution.
@@ -329,7 +355,8 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                                          "Failed to prepare target directory.");
         }
 
-        // Write atomically: dump to a sibling temp file, fsync-lite, then rename.
+        // Write atomically: dump to a sibling temp file, fsync-lite, then
+        // rename. The reservation keeps any other upload off this temp name.
         const fs::path tmp_path = full_path.string() + ".part";
         {
             std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
