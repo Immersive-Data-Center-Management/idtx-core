@@ -731,6 +731,7 @@ TEST_CASE("shared layer: sessions and LayerReloaded name a file canonically, "
                                              idtx::tests::BuildCubeUsdaBytes(4.0, 0.0, 0.0),
                                              "my asset.usda", /*target_dir=*/"", /*overwrite=*/true);
     REQUIRE(upload.status == 201);
+    CHECK(upload.headers.at("Location") == "/api/v1/download/my%20asset.usda");
     const auto from_upload = idtx::tests::WaitForMessage(
         encoded_ws, std::chrono::milliseconds{10000},
         [](const idtxcore::BaseMessage& m) {

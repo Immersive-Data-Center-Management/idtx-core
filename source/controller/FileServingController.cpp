@@ -455,7 +455,7 @@ crow::response FileServingController::UploadFile(const crow::request& req)
 
         crow::response res(201, json(resp).dump());
         res.set_header("Content-Type", "application/json");
-        res.set_header("Location", "/api/v1/download/" + resp.filepath);
+        res.set_header("Location", idtx::session::SessionManager::DownloadUri(resp.filepath));
         return res;
     }
     catch (const std::exception& e)
