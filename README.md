@@ -186,7 +186,7 @@ Clients join a session via a websocket at `/ws?sid=<session id>` and exchange bi
   2. sends `SnapshotRequest`, because a rebuilt stage no longer holds the session's edits, and processes frames normally again.
   3. sends no updates until the `SnapshotComplete` with its `request_id` has arrived, and takes the base of its next updates from it.
 
-  Per-prim `TransformBroadcast`s for the reload are still sent before `LayerReloaded`, for clients that do not handle it yet.
+  The reload sends no per-prim frames, so a client must handle `LayerReloaded` this way to show the reloaded file.
 - **Commit.** `POST /api/v1/sessions/<id>/commit` is queued behind all previously received updates. It answers `200` with `{"committed": true}` once the file is written and every session using it has been updated, `409 nothing_to_commit`, `503 unavailable` when nothing was queued (the session is shutting down, its queue is full, or another commit or upload of an existing file is still writing; retrying later may succeed), or `202` with `{"committed": false, "pending": true}` when the commit is queued but did not finish within 30 seconds. A pending commit still runs; do not retry it.
 
 | Variable               | Default          | Meaning                                                                                                                        |

@@ -30,10 +30,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/usd/sdf/attributeSpec.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/usdGeom/xformable.h>
 
 #include <idtx/utils/Logger.h>
 
@@ -189,16 +191,6 @@ std::string BuildSnapshotRequest(const std::string& sid, std::uint64_t request_i
     return out;
 }
 
-bool IsBroadcastOf(const idtxcore::BaseMessage& m, const std::string& prim_path, double x)
-{
-    if (m.message_case() != idtxcore::BaseMessage::kXformBroadcast) return false;
-    const auto& upd = m.xform_broadcast().update();
-    if (upd.prim_path() != prim_path) return false;
-    const double got = upd.has_matrix() ? upd.matrix().m30()
-                                        : upd.seperate().translation().x();
-    return got == doctest::Approx(x);
-}
-
 /// Connect and read until SnapshotComplete. Returns its server_seq.
 std::uint64_t Join(WsTestClient& ws, const TestServer& server, const std::string& sid)
 {
@@ -232,6 +224,7 @@ struct StreamResult
 {
     std::size_t                        acks = 0;
     std::vector<idtxcore::BaseMessage> broadcasts;
+    std::vector<idtxcore::BaseMessage> reloads;
     bool                               connection_lost = false;
 };
 
@@ -274,25 +267,46 @@ StreamResult StreamUpdates(WsTestClient& ws,
         {
             result.broadcasts.push_back(msg);
         }
+        else if (msg.message_case() == idtxcore::BaseMessage::kLayerReloaded)
+        {
+            result.reloads.push_back(msg);
+        }
     }
     return result;
 }
 
 /// True if @p received, or the frames that follow on @p ws, contain a
-/// broadcast of @p prim_path with translate x == @p x.
-bool ReceivesBroadcast(WsTestClient& ws,
-                       const std::vector<idtxcore::BaseMessage>& received,
-                       const std::string& prim_path,
-                       double x)
+/// LayerReloaded of @p usd_path.
+bool ReceivesLayerReloaded(WsTestClient& ws,
+                           const std::vector<idtxcore::BaseMessage>& received,
+                           const std::string& usd_path)
 {
     for (const auto& m : received)
     {
-        if (IsBroadcastOf(m, prim_path, x)) return true;
+        if (IsLayerReloadedOf(m, usd_path)) return true;
     }
     return idtx::tests::WaitForMessage(
-               ws, std::chrono::milliseconds{5000},
-               [&](const idtxcore::BaseMessage& m) { return IsBroadcastOf(m, prim_path, x); })
+               ws, std::chrono::milliseconds{10000},
+               [&](const idtxcore::BaseMessage& m) { return IsLayerReloadedOf(m, usd_path); })
         .has_value();
+}
+
+/// The translate of @p prim_path on @p sid's stage, as a client rebuilding it
+/// from the reloaded files and a snapshot shows it.
+std::optional<pxr::GfVec3d> StageTranslate(const TestServer& server,
+                                           const std::string& sid,
+                                           const std::string& prim_path)
+{
+    const auto session = server.session_manager().Get(sid);
+    if (!session) return std::nullopt;
+    std::shared_lock layers(idtx::concurrency::SharedLayers());
+    if (!session->stage) return std::nullopt;
+    const pxr::UsdGeomXformable xformable(session->stage->GetPrimAtPath(pxr::SdfPath(prim_path)));
+    if (!xformable) return std::nullopt;
+    pxr::GfMatrix4d local;
+    bool resets = false;
+    if (!xformable.GetLocalTransformation(&local, &resets)) return std::nullopt;
+    return local.ExtractTranslation();
 }
 
 /// Whether @p session's cached used layers contain the file at @p path.
@@ -432,10 +446,17 @@ TEST_CASE("shared layer: commits reload sessions on the same file and through a 
         CHECK(peer_result.acks == kUpdates);
         CHECK(scene_result.acks == kUpdates);
 
-        // Both other sessions end on the last committed value: the peer on
-        // the same file, the scene through the payload.
-        CHECK(ReceivesBroadcast(peer, peer_result.broadcasts, "/Box", final_x));
-        CHECK(ReceivesBroadcast(scene, scene_result.broadcasts, "/Root/Group/Asset", final_x));
+        // Both other sessions are told to re-fetch the file and end on the
+        // last committed value: the peer on the same file, the scene through
+        // the payload.
+        CHECK(ReceivesLayerReloaded(peer, peer_result.reloads, "asset.usda"));
+        CHECK(ReceivesLayerReloaded(scene, scene_result.reloads, "asset.usda"));
+        CHECK(StageTranslate(server, peer_sid, "/Box") == pxr::GfVec3d(final_x, 0.0, 0.0));
+        CHECK(StageTranslate(server, scene_sid, "/Root/Group/Asset")
+              == pxr::GfVec3d(final_x, 0.0, 0.0));
+        // Reloads announce themselves; they send no transform frames.
+        CHECK(peer_result.broadcasts.empty());
+        CHECK(scene_result.broadcasts.empty());
 
         const auto in_memory = InMemoryTranslate(server.uploads_root() / "asset.usda", "/Box");
         REQUIRE(in_memory.has_value());
@@ -484,7 +505,10 @@ TEST_CASE("shared layer: an upload replacing a file reloads it while a session s
         const StreamResult result = scene_stream.get();
         REQUIRE_FALSE(result.connection_lost);
         CHECK(result.acks == 300);
-        CHECK(ReceivesBroadcast(scene, result.broadcasts, "/Root/Group/Asset", final_x));
+        CHECK(ReceivesLayerReloaded(scene, result.reloads, "asset.usda"));
+        CHECK(StageTranslate(server, scene_sid, "/Root/Group/Asset")
+              == pxr::GfVec3d(final_x, 0.0, 0.0));
+        CHECK(result.broadcasts.empty());
     }
     CHECK(capture.Matches() == 0);
 }
@@ -515,8 +539,10 @@ TEST_CASE("shared layer: deleting an auto-commit session reloads the file for th
     REQUIRE(http.Delete(server.base_http_url() + "/api/v1/sessions/" + committing).status == 204);
 
     // The teardown wrote the file and reloaded its layer, so the remaining
-    // session shows the committed value instead of keeping the old baseline.
-    CHECK(ReceivesBroadcast(watcher, {}, "/Root/Cube", 7.0));
+    // session is told to re-fetch it and shows the committed value instead
+    // of keeping the old baseline.
+    CHECK(ReceivesLayerReloaded(watcher, {}, "cube.usda"));
+    CHECK(StageTranslate(server, watching, "/Root/Cube") == pxr::GfVec3d(7.0, 0.0, 0.0));
 
     double x = 0, y = 0, z = 0;
     REQUIRE(idtx::tests::ReadTranslate(server.uploads_root() / "cube.usda", "/Root/Cube", x, y, z));

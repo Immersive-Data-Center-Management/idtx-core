@@ -153,19 +153,17 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
     // A layer this stage uses was reloaded with SdfLayer::Reload(force=true)
     // on the layer thread (SessionManager::ReloadLayerPausingUsers), possibly
     // for another session's commit or for a file this stage only references.
-    // In that notice the affected paths reflect *authored* changes on that
-    // layer, but the resolved value on the composed stage may still be
-    // masked by an opinion on the session layer (where every
-    // client-driven edit lives). We must therefore consult the
-    // session layer directly and drop any broadcast whose value the
-    // client already holds by composition strength.
+    // Nothing is sent per prim: the reload is announced with LayerReloaded
+    // afterwards, upon which clients re-fetch the file and request a
+    // snapshot. The branch only advances the session's version and records
+    // which prims changed, so client updates made before the reload count
+    // as stale.
     //
-    // The branch is attribute-agnostic by design: it decides "propagate
-    // vs. suppress" based on the presence of a session-layer opinion for
-    // the prim, and only relies on the transform-specific
-    // BroadcastResolvedTransform() at the very last step. That keeps the
-    // door open for non-transform attributes later, at which point only
-    // the final broadcast call has to grow a switch.
+    // In the notice the affected paths reflect *authored* changes on the
+    // reloaded layer, but the resolved value on the composed stage may still
+    // be masked by an opinion on the session layer (where every client-driven
+    // edit lives). Such a prim did not change for the session, so it is not
+    // recorded.
     // -----------------------------------------------------------------
     if (context.reload)
     {
@@ -196,33 +194,20 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
                  "Reload notice in session {} affects {} prim(s); filtering against session layer.",
                  session->id, reload_prims.size());
 
-        // One state version for the whole reload.
+        // One state version for the whole reload. LayerReloaded carries it.
         const std::uint64_t seq = session->server_seq.fetch_add(1) + 1;
 
         for (const auto& prim_path_str : reload_prims)
         {
             // If the session layer authors a transform override for the
-            // prim, the client already holds the winning opinion - skip.
+            // prim, its resolved transform did not change - skip.
             if (session_layer && pxr::SdfPath::IsValidPathString(prim_path_str))
             {
                 const pxr::SdfPrimSpecHandle prim_spec =
                     session_layer->GetPrimAtPath(pxr::SdfPath(prim_path_str));
-                if (SessionLayerHasXformOverride(prim_spec))
-                {
-                    IDTX_LOG(IDTX_DEBUG,
-                             "Suppress reload broadcast for '{}' in session {}: "
-                             "session layer holds stronger xform opinion.",
-                             prim_path_str, session->id);
-                    continue;
-                }
+                if (SessionLayerHasXformOverride(prim_spec)) continue;
             }
-
-            // No conflicting override: propagate the current resolved
-            // transform, exactly like the normal branch would. Only changes
-            // clients see are recorded, so a suppressed prim does not make
-            // client updates stale.
             session->versions.RecordChange(prim_path_str, seq, /*writer=*/0);
-            m_manager_->BroadcastResolvedTransform(*session, prim_path_str, /*origin=*/0, seq);
         }
         return;
     }

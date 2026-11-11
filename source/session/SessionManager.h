@@ -149,8 +149,8 @@ public:
      * layer is reloaded once, inside a single change block, and every stage
      * that uses it is notified: sessions on the file itself and sessions on
      * files that sublayer, reference or payload it. Each session's listener
-     * takes its reload branch and drops the broadcast for any prim whose
-     * session-layer opinion still wins by composition strength.
+     * takes its reload branch and records the prims whose resolved transform
+     * changed; its clients are then sent LayerReloaded.
      *
      * Never blocks. Safe to call from any thread.
      *

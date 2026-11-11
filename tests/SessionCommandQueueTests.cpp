@@ -77,6 +77,11 @@ bool IsSetActiveBroadcast(const idtxcore::BaseMessage& m)
     return m.message_case() == idtxcore::BaseMessage::kSetPrimActiveBroadcast;
 }
 
+bool IsLayerReloaded(const idtxcore::BaseMessage& m)
+{
+    return m.message_case() == idtxcore::BaseMessage::kLayerReloaded;
+}
+
 bool IsAckError(const idtxcore::BaseMessage& m, const std::string& error)
 {
     return IsAck(m) && !m.ack().ok() && m.ack().error() == error;
@@ -877,7 +882,8 @@ TEST_CASE("stale: an update based on a version before a reload is stale")
                                              idtx::tests::BuildCubeUsdaBytes(9.0, 8.0, 7.0),
                                              "cube.usda", /*target_dir=*/"", /*overwrite=*/true);
     REQUIRE(upload.status == 201);
-    const auto reload = Collect(a, 1, std::chrono::seconds{5}, IsBroadcast);
+    // The reload is announced with the session's version after it.
+    const auto reload = Collect(a, 1, std::chrono::seconds{5}, IsLayerReloaded);
     REQUIRE(reload.size() == 1);
     const std::uint64_t reload_seq = reload.front().server_seq();
     CHECK(reload_seq > 0);
