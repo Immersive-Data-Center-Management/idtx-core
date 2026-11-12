@@ -17,6 +17,7 @@
 #include <pxr/base/vt/dictionary.h>
 #include <pxr/usd/sdf/layer.h>
 
+#include "concurrency/SharedLayerLock.h"
 #include "dto/ErrorResponse.h"
 #include "dto/UploadDto.h"
 #include "session/SessionManager.h"
@@ -75,6 +76,25 @@ idtx::utils::UsdFileLocator& FileServingController::Locator()
 {
     if (!m_locator_) m_locator_ = std::make_shared<idtx::utils::UsdFileLocator>();
     return *m_locator_;
+}
+
+std::shared_ptr<void> FileServingController::ReserveUploadName(const std::string& relative_path,
+                                                               const std::filesystem::path& full_path,
+                                                               bool& out_exists)
+{
+    std::lock_guard lk(m_uploads_mutex_);
+    if (!m_uploads_in_progress_.insert(relative_path).second) return nullptr;
+
+    // Checked under the mutex, so no upload can rename its file into place
+    // between this check and the reservation.
+    std::error_code ec;
+    out_exists = std::filesystem::exists(full_path, ec);
+
+    return std::shared_ptr<void>(this, [this, relative_path](void*)
+    {
+        std::lock_guard release_lk(m_uploads_mutex_);
+        m_uploads_in_progress_.erase(relative_path);
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +165,10 @@ crow::response FileServingController::FileExists(const std::string& filepath)
             res.set_header("USD-ERROR", "File not found");
             return res;
         }
+
+        // The layer may be one a session's stage uses and a reload rewrites.
+        // Declared first so it outlives the layer handle.
+        std::shared_lock layers(idtx::concurrency::SharedLayers());
 
         pxr::SdfLayerRefPtr layer = pxr::SdfLayer::FindOrOpen(resolved.string());
         if (!layer)
@@ -264,18 +288,47 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                     idtx::utils::UsdFileLocator::StatusToString(vstatus));
         }
 
-        // Overwrite check (before mkdir so we don't churn the filesystem for
-        // rejected requests). We also remember whether the target existed
-        // before the rename so we know, after the write succeeds, whether
-        // this upload actually replaced an existing file — that's the only
-        // case in which live sessions need to be told to reload.
-        std::error_code ec;
-        const bool target_existed_before = fs::exists(full_path, ec);
+        // Only one upload of a name runs at a time: a second one is rejected
+        // instead of racing the first. The reservation also fixes whether
+        // the file exists until this upload has renamed its file into place,
+        // since no other upload can create or replace it meanwhile. That
+        // decides whether live sessions need to be told to reload.
+        bool target_existed_before = false;
+        const std::shared_ptr<void> reservation =
+            ReserveUploadName(relative_path.generic_string(), full_path, target_existed_before);
+        if (!reservation)
+        {
+            return idtx::dto::make_error(503, "unavailable",
+                "Another upload of this file is still in progress; retry later.");
+        }
         if (target_existed_before && !overwrite)
         {
             return idtx::dto::make_error(409, "conflict",
                 "A file with the same name already exists. Set 'overwrite=true' to replace it.");
         }
+
+        // Replacing an existing file takes the session manager's file-write
+        // slot, which commits hold while they write a file and until it is
+        // reloaded. So an upload and a commit never write the same file at
+        // once, and neither reloads or flattens the other's half-finished
+        // state. A new file needs no slot: no session can have opened it and
+        // no commit writes it. Released when this handler returns, or, after
+        // a replacement, once the reload is done.
+        idtx::session::FileWriteSlot write_slot;
+        if (target_existed_before)
+        {
+            if (auto sm = m_session_manager_.lock())
+            {
+                write_slot = sm->AcquireFileWriteSlot(
+                    idtx::session::SessionManager::kCommitTimeout);
+                if (!write_slot)
+                {
+                    return idtx::dto::make_error(503, "unavailable",
+                        "Another commit or upload is still writing; retry later.");
+                }
+            }
+        }
+        std::error_code ec;
 
         // Ensure the target directory exists and *is* still inside the root
         // after symlink resolution.
@@ -302,7 +355,8 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                                          "Failed to prepare target directory.");
         }
 
-        // Write atomically: dump to a sibling temp file, fsync-lite, then rename.
+        // Write atomically: dump to a sibling temp file, fsync-lite, then
+        // rename. The reservation keeps any other upload off this temp name.
         const fs::path tmp_path = full_path.string() + ".part";
         {
             std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
@@ -330,10 +384,12 @@ crow::response FileServingController::UploadFile(const crow::request& req)
                                          "Failed to finalise uploaded file: " + ec.message());
         }
 
-        // ---- Reload live sessions when this upload replaced an existing
-        // file. We only do this for real replacements (not brand-new files)
-        // because live sessions can only ever be bound to files that already
-        // existed at session-creation time. Errors here are logged but must
+        // ---- Reload the in-memory layer when this upload replaced an
+        // existing file, so every stage using it (sessions on this file and
+        // on files that reference it) sees the new content. Queued on the
+        // session manager's layer thread; does not block. We only do this
+        // for real replacements (not brand-new files) because no stage can
+        // have loaded a file that did not exist yet. Errors here are logged but must
         // not fail the HTTP response — the upload itself succeeded.
         if (target_existed_before && overwrite)
         {
@@ -341,19 +397,18 @@ crow::response FileServingController::UploadFile(const crow::request& req)
             {
                 try
                 {
-                    const std::size_t n = sm->SubmitReloadSessionsCommand(
-                        relative_path.generic_string());
-                    if (n > 0)
+                    if (sm->ReloadSharedLayer(relative_path.generic_string(),
+                                              std::move(write_slot)))
                     {
                         IDTX_LOG(IDTX_INFO,
-                                 "Upload replaced '{}'; triggered reload on {} live session(s).",
-                                 relative_path.generic_string(), n);
+                                 "Upload replaced '{}'; queued a reload of its layer.",
+                                 relative_path.generic_string());
                     }
                 }
                 catch (const std::exception& e)
                 {
                     IDTX_LOG(IDTX_ERROR,
-                             "SubmitReloadSessionsCommand failed for '{}': {}",
+                             "ReloadSharedLayer failed for '{}': {}",
                              relative_path.generic_string(), e.what());
                 }
             }
@@ -400,7 +455,7 @@ crow::response FileServingController::UploadFile(const crow::request& req)
 
         crow::response res(201, json(resp).dump());
         res.set_header("Content-Type", "application/json");
-        res.set_header("Location", "/api/v1/download/" + resp.filepath);
+        res.set_header("Location", idtx::session::SessionManager::DownloadUri(resp.filepath));
         return res;
     }
     catch (const std::exception& e)

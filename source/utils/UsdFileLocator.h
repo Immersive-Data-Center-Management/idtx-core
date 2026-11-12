@@ -137,6 +137,58 @@ public:
     }
 
     /**
+     * @brief The canonical path of @p path, a file under the uploads root,
+     *        relative to that root: decoded (it takes a filesystem path, not
+     *        a request string), normalised (no "." components or repeated
+     *        separators) and '/'-separated.
+     *
+     * Requests may name the same file differently ("./a.usda", "a.usda",
+     * "my%20a.usda" vs "my a.usda"); this gives every file one name, which
+     * sessions store and clients match their layers against.
+     *
+     * The path is compared lexically first, so a symlink inside the uploads
+     * tree keeps its own name; only if that does not place it under the root
+     * (for example because the root itself is reached through a symlink the
+     * path does not use) are both sides canonicalised.
+     *
+     * @param path          Absolute or working-directory-relative path.
+     * @param out_relative  On success: the canonical uploads-relative path.
+     * @return Ok; OutsideRoot if @p path does not lie under the uploads root;
+     *         InvalidPath if it names the root itself; NotFound if the root is
+     *         not accessible.
+     */
+    Status ToUploadsRelative(const std::filesystem::path& path, std::string& out_relative) const
+    {
+        namespace fs = std::filesystem;
+
+        const auto outside = [](const fs::path& relative)
+        {
+            return relative.empty() || *relative.begin() == "..";
+        };
+
+        std::error_code ec;
+        const fs::path root = fs::absolute(m_root_, ec).lexically_normal();
+        if (ec) return Status::NotFound;
+        const fs::path file = fs::absolute(path, ec).lexically_normal();
+        if (ec) return Status::NotFound;
+
+        fs::path relative = file.lexically_relative(root);
+        if (outside(relative))
+        {
+            const fs::path canonical_root = fs::canonical(m_root_, ec);
+            if (ec) return Status::NotFound;
+            const fs::path canonical_file = fs::weakly_canonical(path, ec);
+            if (ec) return Status::NotFound;
+            relative = canonical_file.lexically_relative(canonical_root);
+            if (outside(relative)) return Status::OutsideRoot;
+        }
+        if (relative == ".") return Status::InvalidPath;
+
+        out_relative = relative.generic_string();
+        return Status::Ok;
+    }
+
+    /**
      * @brief Validate a client-supplied upload target (directory + filename)
      *        and compose the absolute path it must be written to.
      *
@@ -402,6 +454,38 @@ public:
             }
         }
         return true;
+    }
+
+    /**
+     * @brief Percent-encode a path for use in a URL, so PercentDecode()
+     *        returns it unchanged. Every byte outside the unreserved set
+     *        (letters, digits, '-', '.', '_', '~') is encoded, except '/',
+     *        which keeps separating the path segments.
+     */
+    static std::string PercentEncodePath(const std::string& path)
+    {
+        static constexpr char kHex[] = "0123456789ABCDEF";
+        std::string out;
+        out.reserve(path.size());
+        for (const char c : path)
+        {
+            const auto byte = static_cast<unsigned char>(c);
+            const bool keep = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z')
+                           || (byte >= '0' && byte <= '9')
+                           || byte == '-' || byte == '.' || byte == '_' || byte == '~'
+                           || byte == '/';
+            if (keep)
+            {
+                out.push_back(c);
+            }
+            else
+            {
+                out.push_back('%');
+                out.push_back(kHex[byte >> 4]);
+                out.push_back(kHex[byte & 0x0F]);
+            }
+        }
+        return out;
     }
 
     static const char* StatusToString(Status s) noexcept

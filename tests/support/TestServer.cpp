@@ -194,7 +194,10 @@ TestServer::TestServer(Options opts)
     m_thread_ = std::thread([this]() {
         try
         {
-            m_server_->GetCrowApp().port(m_port_).concurrency(2).run();
+            // Crow keeps one of these threads for accepting, so this leaves
+            // three for requests: enough for a test to send one while
+            // another is blocked, e.g. waiting for the file-write slot.
+            m_server_->GetCrowApp().port(m_port_).concurrency(4).run();
         }
         catch (...) { /* swallow; destructor will join */ }
     });

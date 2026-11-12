@@ -10,7 +10,11 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <memory>
+#include <mutex>
+#include <set>
+#include <string>
 
 #include <crow/http_request.h>
 #include <crow/http_response.h>
@@ -55,10 +59,10 @@ public:
      *                        related endpoints degrade gracefully.
      * @param session_manager Optional session manager. When provided, an
      *                        upload that replaces an existing file on disk
-     *                        will trigger a root-layer reload on every live
-     *                        session that holds the same USD file
+     *                        reloads the file's in-memory layer, which every
+     *                        session whose stage uses it observes
      *                        (see @c UploadFile and
-     *                        @c idtx::session::SessionManager::SubmitReloadSessionsCommand).
+     *                        @c idtx::session::SessionManager::ReloadSharedLayer).
      *                        Held as a @c weak_ptr because the controller
      *                        must not extend the manager's lifetime.
      */
@@ -173,8 +177,21 @@ private:
         std::filesystem::path& out_full,
         std::filesystem::path& out_relative) const;
 
+    /// Reserve @p relative_path for one upload until the returned handle is
+    /// released, or return an empty handle if another upload of the same
+    /// path is still running. Also reports whether the file existed when the
+    /// reservation was taken: while the name is reserved, no other upload
+    /// can create or replace it.
+    std::shared_ptr<void> ReserveUploadName(const std::string& relative_path,
+                                            const std::filesystem::path& full_path,
+                                            bool& out_exists);
+
     std::shared_ptr<idtx::utils::UsdFileLocator>       m_locator_;
     std::shared_ptr<idtx::thumbnails::ThumbnailWorker> m_thumbnails_;
+    /// Uploads-relative names of the uploads in progress. Guarded by
+    /// m_uploads_mutex_, which is held only to check and update the set.
+    std::mutex                                         m_uploads_mutex_;
+    std::set<std::string>                              m_uploads_in_progress_;
     /// Non-owning link to the session manager. Used only by @c UploadFile
     /// to trigger stage reloads on file replacement. Never dereferenced
     /// without first acquiring the @c weak_ptr into a @c shared_ptr.

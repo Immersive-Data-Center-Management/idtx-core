@@ -11,6 +11,7 @@
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 
+#include "AuthoringContext.h"
 #include "Session.h"
 #include "SessionManager.h"
 
@@ -100,16 +101,30 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
     auto session = m_session_.lock();
     if (!session || !m_manager_) return;
 
-    // The consumer sets the origin around the authoring call and resets it
-    // afterwards, so the listener only reads it.
-    const ConnectionId origin = session->current_origin.load(std::memory_order_relaxed);
+    // Describes the operation on this (the sending) thread, which for a
+    // reload of a shared layer is the layer thread, not this session's
+    // consumer.
+    const AuthoringContext& context = CurrentAuthoringContext();
+    const bool own_command = context.session == session.get();
+
+    // Only this session's consumer may change its stage, and only a reload
+    // that paused this session may change a layer it shares. Anything else
+    // means a missing pause or an out-of-date Session::used_layers.
+    if (context.reload ? !context.IsPaused(session.get()) : !own_command)
+    {
+        IDTX_LOG(IDTX_ERROR,
+                 "Stage notice for session {} from a thread that does not own its stage{}.",
+                 session->id,
+                 context.reload ? " (reload without pausing it; used_layers out of date?)" : "");
+    }
+    const ConnectionId origin = own_command ? context.origin : 0;
 
     // Prim creation announces itself with a CreatePrimBroadcast (sent to every
     // client, including the originator). The authoring still fires a resync
     // notice for the new prim; dropping it here keeps the generic transform
     // path from broadcasting the same creation a second time and bumping
     // server_seq out from under the explicit broadcast.
-    if (session->create_in_progress.load(std::memory_order_relaxed))
+    if (own_command && context.creating)
     {
         IDTX_LOG(IDTX_DEBUG,
                  "Ignoring stage notice in session {}: prim creation broadcasts explicitly.",
@@ -124,7 +139,7 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
     // would read it and broadcast a stale transform frame in place of the
     // delete signal, and would bump server_seq out from under the explicit
     // broadcast.
-    if (session->set_active_in_progress.load(std::memory_order_relaxed))
+    if (own_command && context.setting_active)
     {
         IDTX_LOG(IDTX_DEBUG,
                  "Ignoring stage notice in session {}: prim active-state broadcasts explicitly.",
@@ -135,23 +150,22 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
     // -----------------------------------------------------------------
     // Reload branch
     //
-    // The session's reload command set `reload_in_progress`
-    // right before calling SdfLayer::Reload(force=true) on the root
-    // layer. In that notice the affected paths reflect *authored* changes
-    // on the root layer, but the resolved value on the composed stage may
-    // still be masked by an opinion on the session layer (where every
-    // client-driven edit lives). We must therefore consult the
-    // session layer directly and drop any broadcast whose value the
-    // client already holds by composition strength.
+    // A layer this stage uses was reloaded with SdfLayer::Reload(force=true)
+    // on the layer thread (SessionManager::ReloadLayerPausingUsers), possibly
+    // for another session's commit or for a file this stage only references.
+    // Nothing is sent per prim: the reload is announced with LayerReloaded
+    // afterwards, upon which clients re-fetch the file and request a
+    // snapshot. The branch only advances the session's version and records
+    // which prims changed, so client updates made before the reload count
+    // as stale.
     //
-    // The branch is attribute-agnostic by design: it decides "propagate
-    // vs. suppress" based on the presence of a session-layer opinion for
-    // the prim, and only relies on the transform-specific
-    // BroadcastResolvedTransform() at the very last step. That keeps the
-    // door open for non-transform attributes later, at which point only
-    // the final broadcast call has to grow a switch.
+    // In the notice the affected paths reflect *authored* changes on the
+    // reloaded layer, but the resolved value on the composed stage may still
+    // be masked by an opinion on the session layer (where every client-driven
+    // edit lives). Such a prim did not change for the session, so it is not
+    // recorded.
     // -----------------------------------------------------------------
-    if (session->reload_in_progress.load(std::memory_order_relaxed))
+    if (context.reload)
     {
         const pxr::SdfLayerHandle session_layer =
             session->stage ? session->stage->GetSessionLayer() : pxr::SdfLayerHandle();
@@ -180,33 +194,20 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
                  "Reload notice in session {} affects {} prim(s); filtering against session layer.",
                  session->id, reload_prims.size());
 
-        // One state version for the whole reload.
+        // One state version for the whole reload. LayerReloaded carries it.
         const std::uint64_t seq = session->server_seq.fetch_add(1) + 1;
 
         for (const auto& prim_path_str : reload_prims)
         {
             // If the session layer authors a transform override for the
-            // prim, the client already holds the winning opinion - skip.
+            // prim, its resolved transform did not change - skip.
             if (session_layer && pxr::SdfPath::IsValidPathString(prim_path_str))
             {
                 const pxr::SdfPrimSpecHandle prim_spec =
                     session_layer->GetPrimAtPath(pxr::SdfPath(prim_path_str));
-                if (SessionLayerHasXformOverride(prim_spec))
-                {
-                    IDTX_LOG(IDTX_DEBUG,
-                             "Suppress reload broadcast for '{}' in session {}: "
-                             "session layer holds stronger xform opinion.",
-                             prim_path_str, session->id);
-                    continue;
-                }
+                if (SessionLayerHasXformOverride(prim_spec)) continue;
             }
-
-            // No conflicting override: propagate the current resolved
-            // transform, exactly like the normal branch would. Only changes
-            // clients see are recorded, so a suppressed prim does not make
-            // client updates stale.
             session->versions.RecordChange(prim_path_str, seq, /*writer=*/0);
-            m_manager_->BroadcastResolvedTransform(*session, prim_path_str, /*origin=*/0, seq);
         }
         return;
     }
@@ -239,8 +240,20 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
 
     if (affected_prims.empty()) return;
 
-    IDTX_LOG(IDTX_DEBUG, "Stage change in session {} affects {} prim(s); broadcasting.",
-             session->id, affected_prims.size());
+    /* TODO: IDTX_DEBUG is not filtered in release builds and the logger directly writes to std::cout in IDTXCoreLogger.h.
+     * std::cout will lock for this. Which means that any change notice potentially has to wait on a debug line.
+     * This lock is the same for every session and every log because the logger always writes to std::cout.
+     * Ultimately, the logger should get a proper implementation that works well in a multi-threaded environment
+     * but this is the most hazardous line, thus commenting here for awareness.
+     *
+     * Note also: While std::cout currently ensures that there are no races on the FILE itself,
+     * it does not prevent line interleaving. It locks for every "<<", which means between them another thread could
+     * acquire the lock and write its content into the underlying buffer in between.
+     */
+    /* Disabled for the reasons above.
+     *IDTX_LOG(IDTX_DEBUG, "Stage change in session {} affects {} prim(s); broadcasting.",
+     *        session->id, affected_prims.size());
+     */
 
     // One state version per notice: all broadcasts of this change share it.
     const std::uint64_t seq = session->server_seq.fetch_add(1) + 1;
