@@ -8,6 +8,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <optional>
 
 #include "BoundedMpscMailbox.h"
 #include "SessionCommand.h"
@@ -44,6 +45,11 @@ enum class CommandAdmissionStatus : std::uint8_t
  * single logical consumer of the session and needs no locking. A drain
  * processes at most kMaxCommandsPerDrain commands before yielding the worker
  * back to the executor, so busy sessions cannot starve others.
+ *
+ * A session can be paused (Pause()/Resume()) without blocking any worker:
+ * while paused no drain runs a command, and producers keep queueing. A
+ * command that would have to wait can hand itself back (DeferCurrent()) and
+ * runs again first once the session is resumed.
  *
  * Instances must be owned by a std::shared_ptr (use Create()). A queued drain
  * task keeps the scheduler alive until it has finished.
@@ -119,6 +125,33 @@ public:
      */
     void WaitIdle() const noexcept;
 
+    /**
+     * @brief Stop starting commands until the matching Resume().
+     *
+     * Returns once no command of this session is running. A command that is
+     * running when this is called finishes first; a drain that starts
+     * afterwards ends before running one. Submissions are still accepted and
+     * queued. Pauses nest: commands run again after as many Resume() calls.
+     *
+     * Blocks, so it must not be called from the command handler or from any
+     * executor worker thread: the drain it waits for may need that worker.
+     */
+    void Pause() noexcept;
+
+    /// Undo one Pause() or DeferCurrent(), and schedule a drain if commands
+    /// are pending and nothing else keeps the session paused. Never blocks.
+    void Resume() noexcept;
+
+    /**
+     * @brief From inside the command handler: hand @p command back so it
+     *        runs again first, and pause the session until a Resume().
+     *
+     * Used by a command that cannot proceed without waiting, so that it frees
+     * the worker instead. The command stays counted as pending, so
+     * WaitIdle() keeps waiting for it. The caller arranges the Resume().
+     */
+    void DeferCurrent(SessionCommand&& command) noexcept;
+
     [[nodiscard]]
     bool IsAccepting() const noexcept;
 
@@ -172,6 +205,18 @@ private:
     // Once false, new submissions are rejected. Closing admission does not
     // cancel commands that were already accepted.
     std::atomic<bool> accepting_{true};
+
+    // Outstanding Pause() and DeferCurrent() calls; commands run only while
+    // it is 0. Signed: a Resume() for a deferral may arrive before the
+    // DeferCurrent() it answers, which briefly takes it to -1. Paired with
+    // drain_scheduled_ in the same sequentially consistent store-then-load
+    // pattern as pending_count_, so either Pause() sees a running drain or
+    // the drain sees the pause.
+    std::atomic<int> pause_count_{0};
+
+    // The command handed back by DeferCurrent(); runs before any other.
+    // Consumer-only.
+    std::optional<SessionCommand> deferred_;
 };
 
 } // namespace idtx::session

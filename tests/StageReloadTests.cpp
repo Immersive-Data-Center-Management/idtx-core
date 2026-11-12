@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "support/HttpTestClient.h"
 #include "support/ProtoHelpers.h"
@@ -47,9 +48,47 @@ void AttachAndDrainHandshake(WsTestClient& ws,
     REQUIRE(hs.has_value());
 }
 
+/// Wait for a LayerReloaded of @p usd_path and fail the test if none arrives.
+idtxcore::BaseMessage WaitForLayerReloaded(WsTestClient& ws, const std::string& usd_path)
+{
+    auto reloaded = idtx::tests::WaitForMessage(
+        ws, std::chrono::milliseconds{5000},
+        [&](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kLayerReloaded
+                && m.layer_reloaded().usd_path() == usd_path;
+        });
+    REQUIRE(reloaded.has_value());
+    return *reloaded;
+}
+
+/// Ask for a snapshot and collect its transform frames up to the
+/// SnapshotComplete that answers it.
+std::vector<idtxcore::BaseMessage> RequestSnapshot(WsTestClient& ws, const std::string& sid)
+{
+    constexpr std::uint64_t kRequestId = 42;
+    idtxcore::BaseMessage request;
+    request.set_session_id(sid);
+    request.set_request_id(kRequestId);
+    request.mutable_snapshot_request();
+    std::string payload;
+    REQUIRE(request.SerializeToString(&payload));
+    ws.SendBinary(payload);
+
+    std::vector<idtxcore::BaseMessage> frames;
+    const auto complete = idtx::tests::WaitForMessage(
+        ws, std::chrono::milliseconds{5000},
+        [&](const idtxcore::BaseMessage& m) {
+            if (m.message_case() == idtxcore::BaseMessage::kXformBroadcast) frames.push_back(m);
+            return m.message_case() == idtxcore::BaseMessage::kSnapshotComplete
+                && m.request_id() == kRequestId;
+        });
+    REQUIRE(complete.has_value());
+    return frames;
+}
+
 } // namespace
 
-TEST_CASE("upload replacement reloads live sessions and broadcasts new transform")
+TEST_CASE("upload replacement reloads live sessions and announces the reloaded file")
 {
     TestServer server;
     server.WaitReady();
@@ -70,25 +109,33 @@ TEST_CASE("upload replacement reloads live sessions and broadcasts new transform
                                   /*target_dir=*/"", /*overwrite=*/true);
     REQUIRE(r.status == 201);
 
-    // Expect a single TransformBroadcast for /Root/Cube with the new translate.
-    auto bcast = idtx::tests::WaitForMessage(
-        ws, std::chrono::milliseconds{2000},
-        [](const idtxcore::BaseMessage& m) {
-            return m.message_case() == idtxcore::BaseMessage::kXformBroadcast;
+    // The client is told to re-fetch the file; the reload sends no frame of
+    // its own for the changed prim.
+    bool saw_frame = false;
+    const auto reloaded = idtx::tests::WaitForMessage(
+        ws, std::chrono::milliseconds{5000},
+        [&](const idtxcore::BaseMessage& m) {
+            if (m.message_case() == idtxcore::BaseMessage::kXformBroadcast) saw_frame = true;
+            return m.message_case() == idtxcore::BaseMessage::kLayerReloaded;
         });
-    REQUIRE(bcast.has_value());
-    const auto& upd = bcast->xform_broadcast().update();
-    CHECK(upd.prim_path() == "/Root/Cube");
+    REQUIRE(reloaded.has_value());
+    CHECK(reloaded->layer_reloaded().usd_path() == "cube.usda");
+    CHECK(reloaded->layer_reloaded().usd_uri() == "/api/v1/download/cube.usda");
+    CHECK(reloaded->server_seq() > 0);
+    CHECK_FALSE(saw_frame);
 
-    // The server-authored broadcast uses the "separate" transform form.
-    REQUIRE(upd.transform_case() == idtxcore::TransformUpdate::kSeperate);
-    const auto& t = upd.seperate().translation();
-    CHECK(t.x() == doctest::Approx(9.0));
-    CHECK(t.y() == doctest::Approx(8.0));
-    CHECK(t.z() == doctest::Approx(7.0));
+    // The file the client re-fetches carries the new translate.
+    double x = 0, y = 0, z = 0;
+    REQUIRE(idtx::tests::ReadTranslate(server.uploads_root() / "cube.usda", "/Root/Cube", x, y, z));
+    CHECK(x == doctest::Approx(9.0));
+    CHECK(y == doctest::Approx(8.0));
+    CHECK(z == doctest::Approx(7.0));
+
+    // The session has no edits of its own, so its snapshot is empty.
+    CHECK(RequestSnapshot(ws, sid).empty());
 }
 
-TEST_CASE("upload replacement is suppressed when session layer overrides the change")
+TEST_CASE("upload replacement keeps the session's override, which the snapshot restores")
 {
     TestServer server;
     server.WaitReady();
@@ -99,7 +146,7 @@ TEST_CASE("upload replacement is suppressed when session layer overrides the cha
     AttachAndDrainHandshake(ws, server, sid);
 
     // 1) Client authors a stronger opinion on the session layer by sending a
-    //    TransformUpdate — this puts /Root/Cube at (1, 2, 3) with the winning
+    //    TransformUpdate - this puts /Root/Cube at (1, 2, 3) with the winning
     //    composition strength.
     const std::string payload = idtx::tests::BuildTransformUpdate(
         sid, "cube.usda", "/Root/Cube", 1.0, 2.0, 3.0);
@@ -116,23 +163,24 @@ TEST_CASE("upload replacement is suppressed when session layer overrides the cha
     CHECK(ack->ack().ok());
 
     // 2) Replace cube.usda on disk with a *different* translate (9, 8, 7).
-    //    The session layer's (1, 2, 3) opinion for xformOp:translate still
-    //    wins by composition strength, so the listener must suppress the
-    //    reload broadcast for /Root/Cube.
     HttpTestClient http;
     const std::string new_bytes = idtx::tests::BuildCubeUsdaBytes(9.0, 8.0, 7.0);
     auto r = http.UploadMultipart(server.base_http_url() + "/api/v1/upload",
                                   new_bytes, "cube.usda",
                                   /*target_dir=*/"", /*overwrite=*/true);
     REQUIRE(r.status == 201);
+    (void)WaitForLayerReloaded(ws, "cube.usda");
 
-    // 3) Wait a short interval and verify no additional TransformBroadcast
-    //    arrives. WaitForMessage returns nullopt on timeout, which is the
-    //    expected outcome here.
-    auto extra = idtx::tests::WaitForMessage(
-        ws, std::chrono::milliseconds{500},
-        [](const idtxcore::BaseMessage& m) {
-            return m.message_case() == idtxcore::BaseMessage::kXformBroadcast;
-        });
-    CHECK_FALSE(extra.has_value());
+    // 3) A client that rebuilt its stage from the new file asks for a
+    //    snapshot, which restores the session's (1, 2, 3): it still wins by
+    //    composition strength.
+    const auto frames = RequestSnapshot(ws, sid);
+    REQUIRE(frames.size() == 1);
+    const auto& upd = frames.front().xform_broadcast().update();
+    CHECK(upd.prim_path() == "/Root/Cube");
+    REQUIRE(upd.transform_case() == idtxcore::TransformUpdate::kSeperate);
+    const auto& t = upd.seperate().translation();
+    CHECK(t.x() == doctest::Approx(1.0));
+    CHECK(t.y() == doctest::Approx(2.0));
+    CHECK(t.z() == doctest::Approx(3.0));
 }

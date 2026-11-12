@@ -77,6 +77,11 @@ bool IsSetActiveBroadcast(const idtxcore::BaseMessage& m)
     return m.message_case() == idtxcore::BaseMessage::kSetPrimActiveBroadcast;
 }
 
+bool IsLayerReloaded(const idtxcore::BaseMessage& m)
+{
+    return m.message_case() == idtxcore::BaseMessage::kLayerReloaded;
+}
+
 bool IsAckError(const idtxcore::BaseMessage& m, const std::string& error)
 {
     return IsAck(m) && !m.ack().ok() && m.ack().error() == error;
@@ -802,7 +807,9 @@ TEST_CASE("stale: a client's own earlier updates never make its update stale")
     Join(a, server, sid);
     Join(b, server, sid);
 
-    SendUpdate(b, sid, 1.0, 1);
+    // A value the drag below never repeats: an update that leaves the prim
+    // unchanged is not broadcast.
+    SendUpdate(b, sid, 0.5, 1);
     const auto seen = Collect(a, 1, std::chrono::seconds{5}, IsBroadcast);
     REQUIRE(seen.size() == 1);
     const std::uint64_t base = seen.front().server_seq();
@@ -875,7 +882,8 @@ TEST_CASE("stale: an update based on a version before a reload is stale")
                                              idtx::tests::BuildCubeUsdaBytes(9.0, 8.0, 7.0),
                                              "cube.usda", /*target_dir=*/"", /*overwrite=*/true);
     REQUIRE(upload.status == 201);
-    const auto reload = Collect(a, 1, std::chrono::seconds{5}, IsBroadcast);
+    // The reload is announced with the session's version after it.
+    const auto reload = Collect(a, 1, std::chrono::seconds{5}, IsLayerReloaded);
     REQUIRE(reload.size() == 1);
     const std::uint64_t reload_seq = reload.front().server_seq();
     CHECK(reload_seq > 0);
@@ -1082,8 +1090,9 @@ TEST_CASE("correction: queue_full is followed by a correction the client ends wi
     WsTestClient ws;
     Join(ws, server, sid);
 
-    // Larger than the queue, unpaced, all with base 0.
-    constexpr std::uint64_t kBurst = 5000;
+    // Many times the queue, unpaced, all with base 0, so the queue fills even
+    // though the consumer drains it while the burst is still arriving.
+    constexpr std::uint64_t kBurst = 20000;
     for (std::uint64_t i = 1; i <= kBurst; ++i) SendUpdate(ws, sid, static_cast<double>(i), i);
 
     std::vector<idtxcore::BaseMessage> received;

@@ -80,54 +80,30 @@ struct Session
     std::optional<std::chrono::steady_clock::time_point> empty_since =
         std::chrono::steady_clock::now();
 
-    // The connection whose TransformUpdate is currently being applied, so the
-    // TfNotice listener can suppress the echo broadcast back to it. 0 while
-    // no client-authored change is in progress. Written by the consumer only;
-    // atomic because a notice from a root layer shared with another session
-    // can be delivered on that session's consumer thread.
-    std::atomic<ConnectionId>                         current_origin{0};
-
     // The listener that observes stage changes for this session and drives
     // the broadcast. It owns the pxr::TfNotice::Key and revokes the
-    // registration on destruction.
+    // registration on destruction. Which client caused a change, and whether
+    // it is a reload, a prim creation or an active-state change, is read from
+    // the sending thread's AuthoringContext, because a reload of a shared
+    // layer delivers the notice on the reloading thread rather than on this
+    // session's consumer.
     std::shared_ptr<StageNoticeListener>              listener;
 
-    // Set by the reload command immediately before it calls
-    // SdfLayer::Reload(force=true) on the root layer, and cleared once the
-    // reload returns. While it is true the listener takes the "reload"
-    // branch: it compares each affected prim's authored opinions on the
-    // session layer against those on the root layer and drops the broadcast
-    // for any attribute whose session-layer opinion still wins by
-    // composition strength. Written by the consumer only; atomic for the
-    // same reason as current_origin.
-    std::atomic<bool>                                 reload_in_progress{false};
-
-    // Set by the create-primitive command around the authoring call, and
-    // cleared once it returns. While it is true the listener skips the
-    // notice-driven transform broadcast for the change: prim creation fires a
-    // resync notice for the new prim, but the creation is announced explicitly
-    // with a CreatePrimBroadcast (which also reaches the originator), so the
-    // generic transform path must not also broadcast it. The authoring call
-    // fires the notice synchronously on the consumer while this flag is set.
-    // Written by the consumer only; atomic for the same reason as
-    // current_origin.
-    std::atomic<bool>                                 create_in_progress{false};
-
-    // Set by the set-prim-active command (soft delete / undo-delete) around
-    // the authoring call, and cleared once it returns. Like create_in_progress
-    // it makes the listener skip the resync that SetActive() fires, because the
-    // change is announced explicitly with a SetPrimActiveBroadcast. This is not
-    // merely an optimization: an inactive prim is still readable via
-    // GetPrimAtPath, so without this flag the generic transform path would read
-    // the (now inactive) prim and broadcast a misleading transform frame in
-    // place of the delete signal. Written by the consumer only; atomic for the
-    // same reason as current_origin.
-    std::atomic<bool>                                 set_active_in_progress{false};
+    // Every layer the stage composes (UsdStage::GetUsedLayers()): root,
+    // sublayers, references, payloads and the session layer. A reload of a
+    // layer pauses exactly the sessions listing it. Guarded by
+    // idtx::concurrency::SharedLayers(): written while holding it shared, by
+    // Create() and by commands that add or drop layers (payload changes, and
+    // active-state changes, which prune or restore a subtree with whatever it
+    // references), and by a reload while holding it exclusively; read by a
+    // reload.
+    pxr::SdfLayerHandleVector                         used_layers;
 
     // Per-session state version. Incremented once for every stage change
     // observed by the listener and for every correction, and stamped on outgoing broadcasts, acks and
-    // snapshots as BaseMessage.server_seq. Atomic for the same reason as
-    // current_origin.
+    // snapshots as BaseMessage.server_seq. Touched by the consumer, and by a
+    // reload on another thread while the consumer is paused; the pause orders
+    // the two.
     std::atomic<std::uint64_t>                        server_seq{0};
 
     // Which versions changed which prim and which were sent to which

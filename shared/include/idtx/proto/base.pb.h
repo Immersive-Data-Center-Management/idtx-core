@@ -65,10 +65,18 @@ class Handshake;
 struct HandshakeDefaultTypeInternal;
 extern HandshakeDefaultTypeInternal _Handshake_default_instance_;
 extern const ::google::protobuf::internal::ClassDataFull Handshake_class_data_;
+class LayerReloaded;
+struct LayerReloadedDefaultTypeInternal;
+extern LayerReloadedDefaultTypeInternal _LayerReloaded_default_instance_;
+extern const ::google::protobuf::internal::ClassDataFull LayerReloaded_class_data_;
 class SnapshotComplete;
 struct SnapshotCompleteDefaultTypeInternal;
 extern SnapshotCompleteDefaultTypeInternal _SnapshotComplete_default_instance_;
 extern const ::google::protobuf::internal::ClassDataFull SnapshotComplete_class_data_;
+class SnapshotRequest;
+struct SnapshotRequestDefaultTypeInternal;
+extern SnapshotRequestDefaultTypeInternal _SnapshotRequest_default_instance_;
+extern const ::google::protobuf::internal::ClassDataFull SnapshotRequest_class_data_;
 }  // namespace idtxcore
 namespace google {
 namespace protobuf {
@@ -80,6 +88,140 @@ namespace idtxcore {
 // ===================================================================
 
 
+// -------------------------------------------------------------------
+
+class SnapshotRequest final : public ::google::protobuf::internal::ZeroFieldsBase
+/* @@protoc_insertion_point(class_definition:idtxcore.SnapshotRequest) */ {
+ public:
+  inline SnapshotRequest() : SnapshotRequest(nullptr) {}
+
+#if defined(PROTOBUF_CUSTOM_VTABLE)
+  void operator delete(SnapshotRequest* PROTOBUF_NONNULL msg, ::std::destroying_delete_t) {
+    SharedDtor(*msg);
+    ::google::protobuf::internal::SizedDelete(msg, sizeof(SnapshotRequest));
+  }
+#endif
+
+  template <typename = void>
+  explicit PROTOBUF_CONSTEXPR SnapshotRequest(::google::protobuf::internal::ConstantInitialized);
+
+  inline SnapshotRequest(const SnapshotRequest& from) : SnapshotRequest(nullptr, from) {}
+  inline SnapshotRequest(SnapshotRequest&& from) noexcept
+      : SnapshotRequest(nullptr, ::std::move(from)) {}
+  inline SnapshotRequest& operator=(const SnapshotRequest& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline SnapshotRequest& operator=(SnapshotRequest&& from) noexcept {
+    if (this == &from) return *this;
+    if (::google::protobuf::internal::CanMoveWithInternalSwap(GetArena(), from.GetArena())) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  inline const ::google::protobuf::UnknownFieldSet& unknown_fields() const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.unknown_fields<::google::protobuf::UnknownFieldSet>(::google::protobuf::UnknownFieldSet::default_instance);
+  }
+  inline ::google::protobuf::UnknownFieldSet* PROTOBUF_NONNULL mutable_unknown_fields()
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.mutable_unknown_fields<::google::protobuf::UnknownFieldSet>();
+  }
+
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL descriptor() {
+    return GetDescriptor();
+  }
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::google::protobuf::Reflection* PROTOBUF_NONNULL GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const SnapshotRequest& default_instance() {
+    return *reinterpret_cast<const SnapshotRequest*>(
+        &_SnapshotRequest_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages = 2;
+  friend void swap(SnapshotRequest& a, SnapshotRequest& b) { a.Swap(&b); }
+  inline void Swap(SnapshotRequest* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    if (::google::protobuf::internal::CanUseInternalSwap(GetArena(), other->GetArena())) {
+      InternalSwap(other);
+    } else {
+      ::google::protobuf::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(SnapshotRequest* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    ABSL_DCHECK(GetArena() == other->GetArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  SnapshotRequest* PROTOBUF_NONNULL New(::google::protobuf::Arena* PROTOBUF_NULLABLE arena = nullptr) const {
+    return ::google::protobuf::internal::ZeroFieldsBase::DefaultConstruct<SnapshotRequest>(arena);
+  }
+  using ::google::protobuf::internal::ZeroFieldsBase::CopyFrom;
+  inline void CopyFrom(const SnapshotRequest& from) {
+    ::google::protobuf::internal::ZeroFieldsBase::CopyImpl(*this, from);
+  }
+  using ::google::protobuf::internal::ZeroFieldsBase::MergeFrom;
+  void MergeFrom(const SnapshotRequest& from) {
+    ::google::protobuf::internal::ZeroFieldsBase::MergeImpl(*this, from);
+  }
+
+  public:
+  bool IsInitialized() const {
+    return true;
+  }
+ private:
+  template <typename T>
+  friend ::absl::string_view(::google::protobuf::internal::GetAnyMessageName)();
+  static ::absl::string_view FullMessageName() { return "idtxcore.SnapshotRequest"; }
+
+  explicit SnapshotRequest(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  SnapshotRequest(::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const SnapshotRequest& from);
+  SnapshotRequest(
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, SnapshotRequest&& from) noexcept
+      : SnapshotRequest(arena) {
+    *this = ::std::move(from);
+  }
+  const ::google::protobuf::internal::ClassData* PROTOBUF_NONNULL GetClassData() const PROTOBUF_FINAL;
+  static void* PROTOBUF_NONNULL PlacementNew_(
+      const void* PROTOBUF_NONNULL, void* PROTOBUF_NONNULL mem,
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static constexpr auto InternalNewImpl_();
+
+ public:
+  static constexpr auto InternalGenerateClassData_();
+
+  ::google::protobuf::Metadata GetMetadata() const;
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+  // @@protoc_insertion_point(class_scope:idtxcore.SnapshotRequest)
+ private:
+  class _Internal;
+  friend class ::google::protobuf::internal::TcParser;
+  static const ::google::protobuf::internal::TcParseTable<0, 0,
+                                   0, 0,
+                                   2>
+      _table_;
+
+  friend class ::google::protobuf::MessageLite;
+  friend class ::google::protobuf::Arena;
+  template <typename T>
+  friend class ::google::protobuf::Arena::InternalHelper;
+  using InternalArenaConstructable_ = void;
+  using DestructorSkippable_ = void;
+  friend struct ::TableStruct_base_2eproto;
+};
+
+extern const ::google::protobuf::internal::ClassDataFull SnapshotRequest_class_data_;
 // -------------------------------------------------------------------
 
 class SnapshotComplete final : public ::google::protobuf::internal::ZeroFieldsBase
@@ -214,6 +356,218 @@ class SnapshotComplete final : public ::google::protobuf::internal::ZeroFieldsBa
 };
 
 extern const ::google::protobuf::internal::ClassDataFull SnapshotComplete_class_data_;
+// -------------------------------------------------------------------
+
+class LayerReloaded final : public ::google::protobuf::Message
+/* @@protoc_insertion_point(class_definition:idtxcore.LayerReloaded) */ {
+ public:
+  inline LayerReloaded() : LayerReloaded(nullptr) {}
+  ~LayerReloaded() PROTOBUF_FINAL;
+
+#if defined(PROTOBUF_CUSTOM_VTABLE)
+  void operator delete(LayerReloaded* PROTOBUF_NONNULL msg, ::std::destroying_delete_t) {
+    SharedDtor(*msg);
+    ::google::protobuf::internal::SizedDelete(msg, sizeof(LayerReloaded));
+  }
+#endif
+
+  template <typename = void>
+  explicit PROTOBUF_CONSTEXPR LayerReloaded(::google::protobuf::internal::ConstantInitialized);
+
+  inline LayerReloaded(const LayerReloaded& from) : LayerReloaded(nullptr, from) {}
+  inline LayerReloaded(LayerReloaded&& from) noexcept
+      : LayerReloaded(nullptr, ::std::move(from)) {}
+  inline LayerReloaded& operator=(const LayerReloaded& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline LayerReloaded& operator=(LayerReloaded&& from) noexcept {
+    if (this == &from) return *this;
+    if (::google::protobuf::internal::CanMoveWithInternalSwap(GetArena(), from.GetArena())) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  inline const ::google::protobuf::UnknownFieldSet& unknown_fields() const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.unknown_fields<::google::protobuf::UnknownFieldSet>(::google::protobuf::UnknownFieldSet::default_instance);
+  }
+  inline ::google::protobuf::UnknownFieldSet* PROTOBUF_NONNULL mutable_unknown_fields()
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.mutable_unknown_fields<::google::protobuf::UnknownFieldSet>();
+  }
+
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL descriptor() {
+    return GetDescriptor();
+  }
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::google::protobuf::Reflection* PROTOBUF_NONNULL GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const LayerReloaded& default_instance() {
+    return *reinterpret_cast<const LayerReloaded*>(
+        &_LayerReloaded_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages = 3;
+  friend void swap(LayerReloaded& a, LayerReloaded& b) { a.Swap(&b); }
+  inline void Swap(LayerReloaded* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    if (::google::protobuf::internal::CanUseInternalSwap(GetArena(), other->GetArena())) {
+      InternalSwap(other);
+    } else {
+      ::google::protobuf::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(LayerReloaded* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    ABSL_DCHECK(GetArena() == other->GetArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  LayerReloaded* PROTOBUF_NONNULL New(::google::protobuf::Arena* PROTOBUF_NULLABLE arena = nullptr) const {
+    return ::google::protobuf::Message::DefaultConstruct<LayerReloaded>(arena);
+  }
+  using ::google::protobuf::Message::CopyFrom;
+  void CopyFrom(const LayerReloaded& from);
+  using ::google::protobuf::Message::MergeFrom;
+  void MergeFrom(const LayerReloaded& from) { LayerReloaded::MergeImpl(*this, from); }
+
+  private:
+  static void MergeImpl(::google::protobuf::MessageLite& to_msg,
+                        const ::google::protobuf::MessageLite& from_msg);
+
+  public:
+  bool IsInitialized() const {
+    return true;
+  }
+  ABSL_ATTRIBUTE_REINITIALIZES void Clear() PROTOBUF_FINAL;
+  #if defined(PROTOBUF_CUSTOM_VTABLE)
+  private:
+  static ::size_t ByteSizeLong(const ::google::protobuf::MessageLite& msg);
+  static ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      const ::google::protobuf::MessageLite& msg, ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream);
+
+  public:
+  ::size_t ByteSizeLong() const { return ByteSizeLong(*this); }
+  ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream) const {
+    return _InternalSerialize(*this, target, stream);
+  }
+  #else   // PROTOBUF_CUSTOM_VTABLE
+  ::size_t ByteSizeLong() const final;
+  ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream) const final;
+  #endif  // PROTOBUF_CUSTOM_VTABLE
+  int GetCachedSize() const { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static void SharedDtor(MessageLite& self);
+  void InternalSwap(LayerReloaded* PROTOBUF_NONNULL other);
+ private:
+  template <typename T>
+  friend ::absl::string_view(::google::protobuf::internal::GetAnyMessageName)();
+  static ::absl::string_view FullMessageName() { return "idtxcore.LayerReloaded"; }
+
+  explicit LayerReloaded(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  LayerReloaded(::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const LayerReloaded& from);
+  LayerReloaded(
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, LayerReloaded&& from) noexcept
+      : LayerReloaded(arena) {
+    *this = ::std::move(from);
+  }
+  const ::google::protobuf::internal::ClassData* PROTOBUF_NONNULL GetClassData() const PROTOBUF_FINAL;
+  static void* PROTOBUF_NONNULL PlacementNew_(
+      const void* PROTOBUF_NONNULL, void* PROTOBUF_NONNULL mem,
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static constexpr auto InternalNewImpl_();
+
+ public:
+  static constexpr auto InternalGenerateClassData_();
+
+  ::google::protobuf::Metadata GetMetadata() const;
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+  enum : int {
+    kUsdPathFieldNumber = 1,
+    kUsdUriFieldNumber = 2,
+  };
+  // string usd_path = 1;
+  void clear_usd_path() ;
+  const ::std::string& usd_path() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_usd_path(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_usd_path();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_usd_path();
+  void set_allocated_usd_path(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_usd_path() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_usd_path(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_usd_path();
+
+  public:
+  // string usd_uri = 2;
+  void clear_usd_uri() ;
+  const ::std::string& usd_uri() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_usd_uri(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_usd_uri();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_usd_uri();
+  void set_allocated_usd_uri(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_usd_uri() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_usd_uri(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_usd_uri();
+
+  public:
+  // @@protoc_insertion_point(class_scope:idtxcore.LayerReloaded)
+ private:
+  class _Internal;
+  friend class ::google::protobuf::internal::TcParser;
+  static const ::google::protobuf::internal::TcParseTable<1, 2,
+                                   0, 46,
+                                   2>
+      _table_;
+
+  friend class ::google::protobuf::MessageLite;
+  friend class ::google::protobuf::Arena;
+  template <typename T>
+  friend class ::google::protobuf::Arena::InternalHelper;
+  using InternalArenaConstructable_ = void;
+  using DestructorSkippable_ = void;
+  struct Impl_ {
+    inline explicit constexpr Impl_(::google::protobuf::internal::ConstantInitialized) noexcept;
+    inline explicit Impl_(
+        ::google::protobuf::internal::InternalVisibility visibility,
+        ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+    inline explicit Impl_(
+        ::google::protobuf::internal::InternalVisibility visibility,
+        ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const Impl_& from,
+        const LayerReloaded& from_msg);
+    ::google::protobuf::internal::HasBits<1> _has_bits_;
+    ::google::protobuf::internal::CachedSize _cached_size_;
+    ::google::protobuf::internal::ArenaStringPtr usd_path_;
+    ::google::protobuf::internal::ArenaStringPtr usd_uri_;
+    PROTOBUF_TSAN_DECLARE_MEMBER
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_base_2eproto;
+};
+
+extern const ::google::protobuf::internal::ClassDataFull LayerReloaded_class_data_;
 // -------------------------------------------------------------------
 
 class Handshake final : public ::google::protobuf::Message
@@ -528,9 +882,11 @@ class BaseMessage final : public ::google::protobuf::Message
     kCreatePrimBroadcast = 11,
     kSetPrimActive = 12,
     kSetPrimActiveBroadcast = 13,
+    kLayerReloaded = 14,
+    kSnapshotRequest = 15,
     MESSAGE_NOT_SET = 0,
   };
-  static constexpr int kIndexInFileMessages = 2;
+  static constexpr int kIndexInFileMessages = 4;
   friend void swap(BaseMessage& a, BaseMessage& b) { a.Swap(&b); }
   inline void Swap(BaseMessage* PROTOBUF_NONNULL other) {
     if (other == this) return;
@@ -630,6 +986,8 @@ class BaseMessage final : public ::google::protobuf::Message
     kCreatePrimBroadcastFieldNumber = 11,
     kSetPrimActiveFieldNumber = 12,
     kSetPrimActiveBroadcastFieldNumber = 13,
+    kLayerReloadedFieldNumber = 14,
+    kSnapshotRequestFieldNumber = 15,
   };
   // optional string session_id = 1;
   bool has_session_id() const;
@@ -857,6 +1215,44 @@ class BaseMessage final : public ::google::protobuf::Message
   ::idtxcore::SetPrimActiveBroadcast* PROTOBUF_NONNULL _internal_mutable_set_prim_active_broadcast();
 
   public:
+  // .idtxcore.LayerReloaded layer_reloaded = 14;
+  bool has_layer_reloaded() const;
+  private:
+  bool _internal_has_layer_reloaded() const;
+
+  public:
+  void clear_layer_reloaded() ;
+  const ::idtxcore::LayerReloaded& layer_reloaded() const;
+  [[nodiscard]] ::idtxcore::LayerReloaded* PROTOBUF_NULLABLE release_layer_reloaded();
+  ::idtxcore::LayerReloaded* PROTOBUF_NONNULL mutable_layer_reloaded();
+  void set_allocated_layer_reloaded(::idtxcore::LayerReloaded* PROTOBUF_NULLABLE value);
+  void unsafe_arena_set_allocated_layer_reloaded(::idtxcore::LayerReloaded* PROTOBUF_NULLABLE value);
+  ::idtxcore::LayerReloaded* PROTOBUF_NULLABLE unsafe_arena_release_layer_reloaded();
+
+  private:
+  const ::idtxcore::LayerReloaded& _internal_layer_reloaded() const;
+  ::idtxcore::LayerReloaded* PROTOBUF_NONNULL _internal_mutable_layer_reloaded();
+
+  public:
+  // .idtxcore.SnapshotRequest snapshot_request = 15;
+  bool has_snapshot_request() const;
+  private:
+  bool _internal_has_snapshot_request() const;
+
+  public:
+  void clear_snapshot_request() ;
+  const ::idtxcore::SnapshotRequest& snapshot_request() const;
+  [[nodiscard]] ::idtxcore::SnapshotRequest* PROTOBUF_NULLABLE release_snapshot_request();
+  ::idtxcore::SnapshotRequest* PROTOBUF_NONNULL mutable_snapshot_request();
+  void set_allocated_snapshot_request(::idtxcore::SnapshotRequest* PROTOBUF_NULLABLE value);
+  void unsafe_arena_set_allocated_snapshot_request(::idtxcore::SnapshotRequest* PROTOBUF_NULLABLE value);
+  ::idtxcore::SnapshotRequest* PROTOBUF_NULLABLE unsafe_arena_release_snapshot_request();
+
+  private:
+  const ::idtxcore::SnapshotRequest& _internal_snapshot_request() const;
+  ::idtxcore::SnapshotRequest* PROTOBUF_NONNULL _internal_mutable_snapshot_request();
+
+  public:
   void clear_message();
   MessageCase message_case() const;
   // @@protoc_insertion_point(class_scope:idtxcore.BaseMessage)
@@ -872,11 +1268,13 @@ class BaseMessage final : public ::google::protobuf::Message
   void set_has_create_prim_broadcast();
   void set_has_set_prim_active();
   void set_has_set_prim_active_broadcast();
+  void set_has_layer_reloaded();
+  void set_has_snapshot_request();
   inline bool has_message() const;
   inline void clear_has_message();
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<4, 13,
-                                   10, 47,
+  static const ::google::protobuf::internal::TcParseTable<4, 15,
+                                   12, 47,
                                    2>
       _table_;
 
@@ -913,6 +1311,8 @@ class BaseMessage final : public ::google::protobuf::Message
       ::google::protobuf::Message* PROTOBUF_NULLABLE create_prim_broadcast_;
       ::google::protobuf::Message* PROTOBUF_NULLABLE set_prim_active_;
       ::google::protobuf::Message* PROTOBUF_NULLABLE set_prim_active_broadcast_;
+      ::google::protobuf::Message* PROTOBUF_NULLABLE layer_reloaded_;
+      ::google::protobuf::Message* PROTOBUF_NULLABLE snapshot_request_;
     } message_;
     ::uint32_t _oneof_case_[1];
     PROTOBUF_TSAN_DECLARE_MEMBER
@@ -1202,6 +1602,144 @@ inline void Handshake::set_allocated_usd_uri(::std::string* PROTOBUF_NULLABLE va
 // -------------------------------------------------------------------
 
 // SnapshotComplete
+
+// -------------------------------------------------------------------
+
+// SnapshotRequest
+
+// -------------------------------------------------------------------
+
+// LayerReloaded
+
+// string usd_path = 1;
+inline void LayerReloaded::clear_usd_path() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.usd_path_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000001U);
+}
+inline const ::std::string& LayerReloaded::usd_path() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.LayerReloaded.usd_path)
+  return _internal_usd_path();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void LayerReloaded::set_usd_path(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  _impl_.usd_path_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:idtxcore.LayerReloaded.usd_path)
+}
+inline ::std::string* PROTOBUF_NONNULL LayerReloaded::mutable_usd_path()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  ::std::string* _s = _internal_mutable_usd_path();
+  // @@protoc_insertion_point(field_mutable:idtxcore.LayerReloaded.usd_path)
+  return _s;
+}
+inline const ::std::string& LayerReloaded::_internal_usd_path() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.usd_path_.Get();
+}
+inline void LayerReloaded::_internal_set_usd_path(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.usd_path_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL LayerReloaded::_internal_mutable_usd_path() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.usd_path_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE LayerReloaded::release_usd_path() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:idtxcore.LayerReloaded.usd_path)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000001U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  auto* released = _impl_.usd_path_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.usd_path_.Set("", GetArena());
+  }
+  return released;
+}
+inline void LayerReloaded::set_allocated_usd_path(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  }
+  _impl_.usd_path_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.usd_path_.IsDefault()) {
+    _impl_.usd_path_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:idtxcore.LayerReloaded.usd_path)
+}
+
+// string usd_uri = 2;
+inline void LayerReloaded::clear_usd_uri() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.usd_uri_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000002U);
+}
+inline const ::std::string& LayerReloaded::usd_uri() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.LayerReloaded.usd_uri)
+  return _internal_usd_uri();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void LayerReloaded::set_usd_uri(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  _impl_.usd_uri_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:idtxcore.LayerReloaded.usd_uri)
+}
+inline ::std::string* PROTOBUF_NONNULL LayerReloaded::mutable_usd_uri()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ::std::string* _s = _internal_mutable_usd_uri();
+  // @@protoc_insertion_point(field_mutable:idtxcore.LayerReloaded.usd_uri)
+  return _s;
+}
+inline const ::std::string& LayerReloaded::_internal_usd_uri() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.usd_uri_.Get();
+}
+inline void LayerReloaded::_internal_set_usd_uri(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.usd_uri_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL LayerReloaded::_internal_mutable_usd_uri() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.usd_uri_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE LayerReloaded::release_usd_uri() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:idtxcore.LayerReloaded.usd_uri)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  auto* released = _impl_.usd_uri_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.usd_uri_.Set("", GetArena());
+  }
+  return released;
+}
+inline void LayerReloaded::set_allocated_usd_uri(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  }
+  _impl_.usd_uri_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.usd_uri_.IsDefault()) {
+    _impl_.usd_uri_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:idtxcore.LayerReloaded.usd_uri)
+}
 
 // -------------------------------------------------------------------
 
@@ -2005,6 +2543,170 @@ inline ::idtxcore::SetPrimActiveBroadcast* PROTOBUF_NONNULL BaseMessage::mutable
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   ::idtxcore::SetPrimActiveBroadcast* _msg = _internal_mutable_set_prim_active_broadcast();
   // @@protoc_insertion_point(field_mutable:idtxcore.BaseMessage.set_prim_active_broadcast)
+  return _msg;
+}
+
+// .idtxcore.LayerReloaded layer_reloaded = 14;
+inline bool BaseMessage::has_layer_reloaded() const {
+  return message_case() == kLayerReloaded;
+}
+inline bool BaseMessage::_internal_has_layer_reloaded() const {
+  return message_case() == kLayerReloaded;
+}
+inline void BaseMessage::set_has_layer_reloaded() {
+  _impl_._oneof_case_[0] = kLayerReloaded;
+}
+inline void BaseMessage::clear_layer_reloaded() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (message_case() == kLayerReloaded) {
+    if (GetArena() == nullptr) {
+      delete _impl_.message_.layer_reloaded_;
+    } else if (::google::protobuf::internal::DebugHardenClearOneofMessageOnArena()) {
+      ::google::protobuf::internal::MaybePoisonAfterClear(_impl_.message_.layer_reloaded_);
+    }
+    clear_has_message();
+  }
+}
+inline ::idtxcore::LayerReloaded* PROTOBUF_NULLABLE BaseMessage::release_layer_reloaded() {
+  // @@protoc_insertion_point(field_release:idtxcore.BaseMessage.layer_reloaded)
+  if (message_case() == kLayerReloaded) {
+    clear_has_message();
+    auto* temp = reinterpret_cast<::idtxcore::LayerReloaded*>(_impl_.message_.layer_reloaded_);
+    if (GetArena() != nullptr) {
+      temp = ::google::protobuf::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.message_.layer_reloaded_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::idtxcore::LayerReloaded& BaseMessage::_internal_layer_reloaded() const {
+  return message_case() == kLayerReloaded ? static_cast<const ::idtxcore::LayerReloaded&>(*reinterpret_cast<::idtxcore::LayerReloaded*>(_impl_.message_.layer_reloaded_))
+                     : reinterpret_cast<const ::idtxcore::LayerReloaded&>(::idtxcore::_LayerReloaded_default_instance_);
+}
+inline const ::idtxcore::LayerReloaded& BaseMessage::layer_reloaded() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.BaseMessage.layer_reloaded)
+  return _internal_layer_reloaded();
+}
+inline ::idtxcore::LayerReloaded* PROTOBUF_NULLABLE BaseMessage::unsafe_arena_release_layer_reloaded() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:idtxcore.BaseMessage.layer_reloaded)
+  if (message_case() == kLayerReloaded) {
+    clear_has_message();
+    auto* temp = reinterpret_cast<::idtxcore::LayerReloaded*>(_impl_.message_.layer_reloaded_);
+    _impl_.message_.layer_reloaded_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void BaseMessage::unsafe_arena_set_allocated_layer_reloaded(
+    ::idtxcore::LayerReloaded* PROTOBUF_NULLABLE value) {
+  // We rely on the oneof clear method to free the earlier contents
+  // of this oneof. We can directly use the pointer we're given to
+  // set the new value.
+  clear_message();
+  if (value) {
+    set_has_layer_reloaded();
+    _impl_.message_.layer_reloaded_ = reinterpret_cast<::google::protobuf::Message*>(value);
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:idtxcore.BaseMessage.layer_reloaded)
+}
+inline ::idtxcore::LayerReloaded* PROTOBUF_NONNULL BaseMessage::_internal_mutable_layer_reloaded() {
+  if (message_case() != kLayerReloaded) {
+    clear_message();
+    set_has_layer_reloaded();
+    _impl_.message_.layer_reloaded_ = reinterpret_cast<::google::protobuf::Message*>(
+        ::google::protobuf::Message::DefaultConstruct<::idtxcore::LayerReloaded>(GetArena()));
+  }
+  return reinterpret_cast<::idtxcore::LayerReloaded*>(_impl_.message_.layer_reloaded_);
+}
+inline ::idtxcore::LayerReloaded* PROTOBUF_NONNULL BaseMessage::mutable_layer_reloaded()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  ::idtxcore::LayerReloaded* _msg = _internal_mutable_layer_reloaded();
+  // @@protoc_insertion_point(field_mutable:idtxcore.BaseMessage.layer_reloaded)
+  return _msg;
+}
+
+// .idtxcore.SnapshotRequest snapshot_request = 15;
+inline bool BaseMessage::has_snapshot_request() const {
+  return message_case() == kSnapshotRequest;
+}
+inline bool BaseMessage::_internal_has_snapshot_request() const {
+  return message_case() == kSnapshotRequest;
+}
+inline void BaseMessage::set_has_snapshot_request() {
+  _impl_._oneof_case_[0] = kSnapshotRequest;
+}
+inline void BaseMessage::clear_snapshot_request() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (message_case() == kSnapshotRequest) {
+    if (GetArena() == nullptr) {
+      delete _impl_.message_.snapshot_request_;
+    } else if (::google::protobuf::internal::DebugHardenClearOneofMessageOnArena()) {
+      ::google::protobuf::internal::MaybePoisonAfterClear(_impl_.message_.snapshot_request_);
+    }
+    clear_has_message();
+  }
+}
+inline ::idtxcore::SnapshotRequest* PROTOBUF_NULLABLE BaseMessage::release_snapshot_request() {
+  // @@protoc_insertion_point(field_release:idtxcore.BaseMessage.snapshot_request)
+  if (message_case() == kSnapshotRequest) {
+    clear_has_message();
+    auto* temp = reinterpret_cast<::idtxcore::SnapshotRequest*>(_impl_.message_.snapshot_request_);
+    if (GetArena() != nullptr) {
+      temp = ::google::protobuf::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.message_.snapshot_request_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::idtxcore::SnapshotRequest& BaseMessage::_internal_snapshot_request() const {
+  return message_case() == kSnapshotRequest ? static_cast<const ::idtxcore::SnapshotRequest&>(*reinterpret_cast<::idtxcore::SnapshotRequest*>(_impl_.message_.snapshot_request_))
+                     : reinterpret_cast<const ::idtxcore::SnapshotRequest&>(::idtxcore::_SnapshotRequest_default_instance_);
+}
+inline const ::idtxcore::SnapshotRequest& BaseMessage::snapshot_request() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.BaseMessage.snapshot_request)
+  return _internal_snapshot_request();
+}
+inline ::idtxcore::SnapshotRequest* PROTOBUF_NULLABLE BaseMessage::unsafe_arena_release_snapshot_request() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:idtxcore.BaseMessage.snapshot_request)
+  if (message_case() == kSnapshotRequest) {
+    clear_has_message();
+    auto* temp = reinterpret_cast<::idtxcore::SnapshotRequest*>(_impl_.message_.snapshot_request_);
+    _impl_.message_.snapshot_request_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void BaseMessage::unsafe_arena_set_allocated_snapshot_request(
+    ::idtxcore::SnapshotRequest* PROTOBUF_NULLABLE value) {
+  // We rely on the oneof clear method to free the earlier contents
+  // of this oneof. We can directly use the pointer we're given to
+  // set the new value.
+  clear_message();
+  if (value) {
+    set_has_snapshot_request();
+    _impl_.message_.snapshot_request_ = reinterpret_cast<::google::protobuf::Message*>(value);
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:idtxcore.BaseMessage.snapshot_request)
+}
+inline ::idtxcore::SnapshotRequest* PROTOBUF_NONNULL BaseMessage::_internal_mutable_snapshot_request() {
+  if (message_case() != kSnapshotRequest) {
+    clear_message();
+    set_has_snapshot_request();
+    _impl_.message_.snapshot_request_ = reinterpret_cast<::google::protobuf::Message*>(
+        ::google::protobuf::Message::DefaultConstruct<::idtxcore::SnapshotRequest>(GetArena()));
+  }
+  return reinterpret_cast<::idtxcore::SnapshotRequest*>(_impl_.message_.snapshot_request_);
+}
+inline ::idtxcore::SnapshotRequest* PROTOBUF_NONNULL BaseMessage::mutable_snapshot_request()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  ::idtxcore::SnapshotRequest* _msg = _internal_mutable_snapshot_request();
+  // @@protoc_insertion_point(field_mutable:idtxcore.BaseMessage.snapshot_request)
   return _msg;
 }
 

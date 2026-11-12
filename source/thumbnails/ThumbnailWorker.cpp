@@ -1,6 +1,9 @@
 #include "thumbnails/ThumbnailWorker.h"
 
+#include <shared_mutex>
 #include <utility>
+
+#include "concurrency/SharedLayerLock.h"
 
 namespace idtx
 {
@@ -56,6 +59,11 @@ void ThumbnailWorker::Run()
         std::string err;
         try
         {
+            // The generator's stage shares layers with session stages and is
+            // recomposed by any reload of them, so it lives entirely under
+            // the shared lock. A reload waits for the render to finish; this
+            // thread is not an executor worker, so no session waits with it.
+            std::shared_lock layers(idtx::concurrency::SharedLayers());
             if (!m_generator_->Generate(job.usd_file, job.out_path, err))
             {
                 IDTX_LOG(IDTX_ERROR,

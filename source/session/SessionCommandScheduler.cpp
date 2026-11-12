@@ -87,6 +87,35 @@ void SessionCommandScheduler::WaitIdle() const noexcept
     }
 }
 
+void SessionCommandScheduler::Pause() noexcept
+{
+    pause_count_.fetch_add(1);
+
+    // A drain that starts from now on sees the pause before its first
+    // command, so only one that is already running has to be waited for.
+    while (drain_scheduled_.load())
+    {
+        drain_scheduled_.wait(true);
+    }
+}
+
+void SessionCommandScheduler::Resume() noexcept
+{
+    if (pause_count_.fetch_sub(1) != 1) return;
+
+    // A drain that ended while paused did not reschedule itself.
+    if (pending_count_.load() > 0)
+    {
+        ScheduleDrainIfRequired();
+    }
+}
+
+void SessionCommandScheduler::DeferCurrent(SessionCommand&& command) noexcept
+{
+    deferred_.emplace(std::move(command));
+    pause_count_.fetch_add(1);
+}
+
 bool SessionCommandScheduler::IsAccepting() const noexcept
 {
     return accepting_.load(std::memory_order_relaxed);
@@ -136,7 +165,17 @@ bool SessionCommandScheduler::DrainBatch() noexcept
 
     while (processed < kMaxCommandsPerDrain)
     {
-        std::optional<SessionCommand> command = priority_mailbox_.TryPop();
+        if (pause_count_.load() > 0)
+        {
+            break;
+        }
+
+        std::optional<SessionCommand> command;
+        if (deferred_)
+        {
+            command.swap(deferred_);
+        }
+        if (!command) command = priority_mailbox_.TryPop();
         if (!command) command = mailbox_.TryPop();
         if (!command)
         {
@@ -169,6 +208,13 @@ bool SessionCommandScheduler::DrainBatch() noexcept
         }
         command.reset();
 
+        // Handed back by DeferCurrent(): still pending, and the session is
+        // now paused until the handler's Resume() arrives.
+        if (deferred_)
+        {
+            break;
+        }
+
         ReleasePending();
         ++processed;
     }
@@ -178,8 +224,10 @@ bool SessionCommandScheduler::DrainBatch() noexcept
 
     // A producer that pushed while this batch was running saw
     // drain_scheduled_ == true and did not schedule. Its pending increment
-    // happened before that, so it is visible here.
-    return pending_count_.load() > 0;
+    // happened before that, so it is visible here. While paused, the
+    // Resume() that ends the pause reschedules instead; one that already
+    // happened is visible here for the same reason.
+    return pending_count_.load() > 0 && pause_count_.load() <= 0;
 }
 
 void SessionCommandScheduler::ReleasePending() noexcept
