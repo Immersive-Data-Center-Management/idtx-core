@@ -1156,37 +1156,6 @@ SessionManager::SubmitStatus SessionManager::SubmitSetPrimActiveCommand(
     return status;
 }
 
-SessionManager::SubmitStatus SessionManager::SubmitPayloadCommand(
-    const std::string& session_id,
-    std::string prim_path,
-    std::string asset_path,
-    bool remove,
-    ConnectionId origin,
-    std::uint64_t request_id) const
-{
-    auto session = Get(session_id);
-    if (!session)
-    {
-        IDTX_LOG(IDTX_WARN, "SubmitPayloadCommand: unknown session {}.", session_id);
-        return SubmitStatus::UnknownSession;
-    }
-
-    PayloadCommand command;
-    command.prim_path  = std::move(prim_path);
-    command.asset_path = std::move(asset_path);
-    command.remove     = remove;
-    command.origin     = origin;
-    command.request_id = request_id;
-
-    const auto status = Submit(*session, std::move(command));
-    if (status == SubmitStatus::QueueFull)
-    {
-        IDTX_LOG(IDTX_WARN, "Session {} command queue is full; rejecting payload change.",
-                 session_id);
-    }
-    return status;
-}
-
 // ---------------------------------------------------------------------------
 // Command processing (runs on the session's consumer)
 // ---------------------------------------------------------------------------
@@ -1195,7 +1164,9 @@ void SessionManager::ProcessCommand(Session& session, SessionCommand&& command)
 {
     try
     {
-        // A payload change, and an active-state change (which prunes or
+        // Creating a reference/payload prim (a CreatePrimCommand whose request
+        // is PRIM_TYPE_REF — the way a new ref/payload prim enters the stage and
+        // its session layer), and an active-state change (which prunes or
         // restores a subtree together with whatever it references), starts or
         // stops using layers, so it must not overlap a reload, which decides
         // from used_layers which sessions to pause. A worker never waits for
@@ -1205,7 +1176,10 @@ void SessionManager::ProcessCommand(Session& session, SessionCommand&& command)
         // and a reload of one of those pauses this session instead.
         std::shared_lock<idtx::concurrency::SharedLayerLock> layers;
         // Only the commands checked here will make the scheduler try to take the lock.
-        if (std::holds_alternative<PayloadCommand>(command)
+        const auto* create_prim = std::get_if<CreatePrimCommand>(&command);
+        const bool  creates_ref = create_prim && create_prim->request
+            && create_prim->request->type() == idtxcore::PRIM_TYPE_REF;
+        if (creates_ref
             || std::holds_alternative<SetPrimActiveCommand>(command))
         {
             const std::weak_ptr<SessionCommandScheduler> scheduler = session.commands;
@@ -1342,6 +1316,12 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
         SerializeCreatePrimBroadcast(session, req.parent_path(), req.type(), created, seq, &req);
     BroadcastToAll(session, payload, seq);
 
+    // If a reference/payload prim was created, the stage will now compose different layers. A
+    // reload has to find this session for each of them; still under
+    // SharedLayers(), so no reload reads the list meanwhile.
+    if (req.type() == idtxcore::PRIM_TYPE_REF)
+        RefreshUsedLayers(session);
+
     // Ack after the broadcast; SendAck stamps the current server_seq (== seq).
     SendAck(session, command.origin, command.request_id, true, nullptr);
 
@@ -1419,44 +1399,6 @@ void SessionManager::HandleCommand(Session& session, SetPrimActiveCommand& comma
 
     IDTX_LOG(IDTX_INFO, "Session {}: set active={} on '{}'.",
              session.id, command.active, command.prim_path);
-}
-
-void SessionManager::HandleCommand(Session& session, PayloadCommand& command)
-{
-    // Runs with SharedLayers() held shared (see ProcessCommand()).
-    if (!session.stage)
-    {
-        SendAck(session, command.origin, command.request_id, false, "apply_failed");
-        return;
-    }
-
-    bool ok = false;
-    {
-        const AuthoringScope authoring({&session, command.origin});
-
-        // TODO(payload prims): author the arc into the session layer, for
-        // example AddPayload() / ClearPayloads() on the prim's UsdPayloads.
-        // For the implementation:
-        //  - Asset paths authored into the session layer are anchored to the
-        //    sidecar in the sessions directory, not to the root file. Resolve
-        //    the client's path against the root file and author it absolute
-        //    or relative to the sidecar.
-        //  - Loading the payload parses its file on this worker. Open it off
-        //    the worker pool first (for example keep a UsdStage on it alive
-        //    in the command), so only the recompose runs here.
-        //  - What the listener broadcasts for the resulting resync, and the
-        //    message clients receive, is not defined yet.
-        IDTX_LOG(IDTX_WARN, "Session {}: {} payload on '{}' is not implemented yet.",
-                 session.id, command.remove ? "removing a" : "adding a", command.prim_path);
-    }
-
-    // Whatever was authored, the stage may now compose different layers. A
-    // reload has to find this session for each of them; still under
-    // SharedLayers(), so no reload reads the list meanwhile.
-    RefreshUsedLayers(session);
-
-    if (ok) session.dirty.store(true, std::memory_order_relaxed);
-    SendAck(session, command.origin, command.request_id, ok, "not_implemented");
 }
 
 void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)

@@ -174,7 +174,7 @@ struct CreatePrimCommand
  * mailbox requires.
  *
  * Pruning or restoring a subtree also drops or composes again every layer it
- * references or payloads, so like PayloadCommand it runs holding
+ * references or payloads, so like creating ref/payload prims it runs holding
  * idtx::concurrency::SharedLayers() shared and refreshes
  * Session::used_layers.
  */
@@ -192,35 +192,6 @@ struct SetPrimActiveCommand
 
     std::chrono::steady_clock::time_point received_at{
         std::chrono::steady_clock::now()};
-};
-
-/**
- * @brief Add or remove a payload arc on a prim (placeholder).
- *
- * Changes which layers the session's stage composes: adding loads the
- * payload's file through the process-wide layer registry, possibly the same
- * layer another stage uses or a reload is rewriting, and removing may drop
- * the last reference to one. The consumer therefore runs it holding
- * idtx::concurrency::SharedLayers() shared, deferring it while a reload is
- * pending rather than blocking the worker, and refreshes
- * Session::used_layers before releasing the lock.
- *
- * The authoring itself is not implemented yet; see
- * SessionManager::HandleCommand(Session&, PayloadCommand&).
- */
-struct PayloadCommand
-{
-    // Prim that carries (or receives) the payload arc.
-    std::string prim_path;
-
-    // Asset path of the payload's file, as the client sent it. Empty when
-    // removing.
-    std::string asset_path;
-
-    bool remove = false;
-
-    ConnectionId  origin{};
-    std::uint64_t request_id{};
 };
 
 /**
@@ -282,7 +253,6 @@ using SessionCommand = std::variant<
     SnapshotCommand,
     CreatePrimCommand,
     SetPrimActiveCommand,
-    PayloadCommand,
     CommitCommand,
     FlushCommand,
     CorrectionCommand>;
