@@ -569,6 +569,20 @@ PrimDispatcher::SetActiveStatus PrimDispatcher::SetActive(const pxr::UsdStageRef
     // reactivating (undo) only requires that the prim exists, which it does.
     if (!active)
     {
+        // The stage's default prim (named in the root layer's defaultPrim
+        // metadata) is the composition entry point for anyone referencing this
+        // stage; deleting/deactivating it would break those references. Refuse.
+        const pxr::SdfLayerHandle root_layer = stage->GetRootLayer();
+        if (root_layer && root_layer->HasDefaultPrim() &&
+            path == pxr::SdfPath::AbsoluteRootPath().AppendChild(root_layer->GetDefaultPrim()))
+        {
+            IDTX_LOG(IDTX_WARN,
+                     "SetPrimActiveRequest cannot delete '{}': it is the stage's default prim. "
+                     "Ignoring.",
+                     prim_path);
+            return SetActiveStatus::NotDeletable;
+        }
+
         if (!IsLocallyDeletable(prim, stage->GetRootLayer(), stage->GetSessionLayer()))
         {
             IDTX_LOG(IDTX_WARN,

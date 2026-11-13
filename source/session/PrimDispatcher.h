@@ -107,9 +107,10 @@ public:
         AlreadyInState, ///< The prim already had the requested active state.
         InvalidPath,    ///< @p prim_path is empty or not a valid prim path.
         NotFound,       ///< No prim is defined at @p prim_path.
-        NotDeletable,   ///< The prim is the pseudo-root, or is introduced across
-                        ///< a reference/payload or defined in a sublayer, so it
-                        ///< cannot be deleted via a session-layer opinion.
+        NotDeletable,   ///< The prim is the pseudo-root, the stage's default
+                        ///< prim, or is introduced across a reference/payload or
+                        ///< defined in a sublayer, so it cannot be deleted via a
+                        ///< session-layer opinion.
         Failed          ///< USD rejected the authoring call.
     };
 
