@@ -20,7 +20,9 @@
 #include <pxr/usd/sdf/changeBlock.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/payload.h>
 #include <pxr/usd/sdf/primSpec.h>
+#include <pxr/usd/sdf/reference.h>
 #include <pxr/usd/sdf/types.h>
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec3d.h>
@@ -34,6 +36,7 @@
 #include "concurrency/WorkerExecutor.h"
 #include "AuthoringContext.h"
 #include "PrimDispatcher.h"
+#include "ReferencePathResolver.h"
 #include "StageCommitter.h"
 #include "StageNoticeListener.h"
 #include "TransformDispatcher.h"
@@ -161,12 +164,17 @@ bool BuildBroadcastPayload(const Session& session,
 
 // Build a serialized BaseMessage(create_prim_broadcast) describing @p prim
 // (created under @p parent_path with the given @p type) stamped with
-// @p server_seq. Only the attribute fields that apply to the type are set.
+// @p server_seq. Only the attribute fields that apply to the type are set. For
+// a reference prim the arc kind and broadcast reference path are included. When
+// @p transform_src is non-null, its local transform is echoed verbatim onto
+// the broadcast (the live-create path; the join snapshot omits it and conveys
+// position through a separate local xform frame instead).
 std::string SerializeCreatePrimBroadcast(const Session& session,
                                          const std::string& parent_path,
                                          idtxcore::PrimType type,
                                          const CreatedPrim& prim,
-                                         std::uint64_t server_seq)
+                                         std::uint64_t server_seq,
+                                         const idtxcore::CreatePrimRequest* transform_src = nullptr)
 {
     idtxcore::BaseMessage msg;
     msg.set_session_id(session.id);
@@ -180,6 +188,23 @@ std::string SerializeCreatePrimBroadcast(const Session& session,
     if (prim.has_height) bcast->set_height(prim.height);
     if (prim.has_radius) bcast->set_radius(prim.radius);
     if (prim.has_axis)   bcast->set_axis(prim.axis);
+    if (prim.has_width)  bcast->set_width(prim.width);
+    if (prim.has_length) bcast->set_length(prim.length);
+    if (prim.has_ref)
+    {
+        bcast->set_ref_type(prim.ref_type);
+        bcast->set_reference_path(prim.reference_path);
+    }
+
+    if (transform_src)
+    {
+        // Echo the request's local transform verbatim. Per-field has_*
+        // accessors keep this independent of the oneof's name.
+        if (transform_src->has_seperate())
+            *bcast->mutable_seperate() = transform_src->seperate();
+        else if (transform_src->has_matrix())
+            *bcast->mutable_matrix() = transform_src->matrix();
+    }
 
     std::string payload;
     msg.SerializeToString(&payload);
@@ -1078,8 +1103,7 @@ SessionManager::SubmitStatus SessionManager::SubmitSnapshotRequestCommand(
 
 SessionManager::SubmitStatus SessionManager::SubmitCreatePrimCommand(
     const std::string& session_id,
-    std::string parent_path,
-    idtxcore::PrimType type,
+    idtxcore::CreatePrimRequest request,
     ConnectionId origin,
     std::uint64_t request_id) const
 {
@@ -1090,11 +1114,9 @@ SessionManager::SubmitStatus SessionManager::SubmitCreatePrimCommand(
         return SubmitStatus::UnknownSession;
     }
 
-    CreatePrimCommand command;
-    command.parent_path = std::move(parent_path);
-    command.type        = type;
-    command.origin      = origin;
-    command.request_id  = request_id;
+    CreatePrimCommand command(
+        std::make_unique<const idtxcore::CreatePrimRequest>(std::move(request)),
+        origin, request_id);
 
     const auto status = Submit(*session, std::move(command));
     if (status == SubmitStatus::QueueFull)
@@ -1134,37 +1156,6 @@ SessionManager::SubmitStatus SessionManager::SubmitSetPrimActiveCommand(
     return status;
 }
 
-SessionManager::SubmitStatus SessionManager::SubmitPayloadCommand(
-    const std::string& session_id,
-    std::string prim_path,
-    std::string asset_path,
-    bool remove,
-    ConnectionId origin,
-    std::uint64_t request_id) const
-{
-    auto session = Get(session_id);
-    if (!session)
-    {
-        IDTX_LOG(IDTX_WARN, "SubmitPayloadCommand: unknown session {}.", session_id);
-        return SubmitStatus::UnknownSession;
-    }
-
-    PayloadCommand command;
-    command.prim_path  = std::move(prim_path);
-    command.asset_path = std::move(asset_path);
-    command.remove     = remove;
-    command.origin     = origin;
-    command.request_id = request_id;
-
-    const auto status = Submit(*session, std::move(command));
-    if (status == SubmitStatus::QueueFull)
-    {
-        IDTX_LOG(IDTX_WARN, "Session {} command queue is full; rejecting payload change.",
-                 session_id);
-    }
-    return status;
-}
-
 // ---------------------------------------------------------------------------
 // Command processing (runs on the session's consumer)
 // ---------------------------------------------------------------------------
@@ -1173,7 +1164,9 @@ void SessionManager::ProcessCommand(Session& session, SessionCommand&& command)
 {
     try
     {
-        // A payload change, and an active-state change (which prunes or
+        // Creating a reference/payload prim (a CreatePrimCommand whose request
+        // is PRIM_TYPE_REF — the way a new ref/payload prim enters the stage and
+        // its session layer), and an active-state change (which prunes or
         // restores a subtree together with whatever it references), starts or
         // stops using layers, so it must not overlap a reload, which decides
         // from used_layers which sessions to pause. A worker never waits for
@@ -1183,7 +1176,10 @@ void SessionManager::ProcessCommand(Session& session, SessionCommand&& command)
         // and a reload of one of those pauses this session instead.
         std::shared_lock<idtx::concurrency::SharedLayerLock> layers;
         // Only the commands checked here will make the scheduler try to take the lock.
-        if (std::holds_alternative<PayloadCommand>(command)
+        const auto* create_prim = std::get_if<CreatePrimCommand>(&command);
+        const bool  creates_ref = create_prim && create_prim->request
+            && create_prim->request->type() == idtxcore::PRIM_TYPE_REF;
+        if (creates_ref
             || std::holds_alternative<SetPrimActiveCommand>(command))
         {
             const std::weak_ptr<SessionCommandScheduler> scheduler = session.commands;
@@ -1270,25 +1266,28 @@ void SessionManager::HandleCommand(Session& session, TransformCommand& command)
 
 void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
 {
-    if (!session.stage)
+    if (!session.stage || !command.request)
     {
         SendAck(session, command.origin, command.request_id, false, "apply_failed");
         return;
     }
 
-    // Author the prim. The origin is set for consistency with the transform
-    // path; `creating` makes the TfNotice listener skip the resync this
+    const idtxcore::CreatePrimRequest& req = *command.request;
+
+    // Author the prim. current_origin is set for consistency with the transform
+    // path; create_in_progress makes the TfNotice listener skip the resync this
     // authoring fires, because the creation is broadcast explicitly below.
     CreatedPrim created;
     bool ok = false;
     try
     {
+       
         AuthoringContext context;
         context.session  = &session;
         context.origin   = command.origin;
         context.creating = true;
         const AuthoringScope authoring(context);
-        ok = PrimDispatcher::Create(session.stage, command.parent_path, command.type, created);
+        ok = PrimDispatcher::Create(session.stage, req, m_locator_.GetRoot(), created);
     }
     catch (const std::exception& e)
     {
@@ -1297,7 +1296,8 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
 
     if (!ok)
     {
-        // Bad type, or a missing/forbidden parent (including gprim nesting).
+        // Bad type, a missing/forbidden parent (including gprim nesting), or an
+        // invalid/unresolvable reference path.
         SendAck(session, command.origin, command.request_id, false, "invalid_parent");
         return;
     }
@@ -1310,16 +1310,23 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
 
     // It's required to broadcast the prim creation back to all clients, even the one, the command
     // was initiated by, as the prims are required to be created on the server first. The client
-    // follows and only creates based on this message.
+    // follows and only creates based on this message. The local transform (if any) is echoed
+    // verbatim so clients can place the prim themselves.
     const std::string payload =
-        SerializeCreatePrimBroadcast(session, command.parent_path, command.type, created, seq);
+        SerializeCreatePrimBroadcast(session, req.parent_path(), req.type(), created, seq, &req);
     BroadcastToAll(session, payload, seq);
+
+    // If a reference/payload prim was created, the stage will now compose different layers. A
+    // reload has to find this session for each of them; still under
+    // SharedLayers(), so no reload reads the list meanwhile.
+    if (req.type() == idtxcore::PRIM_TYPE_REF)
+        RefreshUsedLayers(session);
 
     // Ack after the broadcast; SendAck stamps the current server_seq (== seq).
     SendAck(session, command.origin, command.request_id, true, nullptr);
 
     IDTX_LOG(IDTX_INFO, "Session {}: created '{}' under '{}'.",
-             session.id, created.prim_path, command.parent_path);
+             session.id, created.prim_path, req.parent_path());
 }
 
 void SessionManager::HandleCommand(Session& session, SetPrimActiveCommand& command)
@@ -1394,44 +1401,6 @@ void SessionManager::HandleCommand(Session& session, SetPrimActiveCommand& comma
              session.id, command.active, command.prim_path);
 }
 
-void SessionManager::HandleCommand(Session& session, PayloadCommand& command)
-{
-    // Runs with SharedLayers() held shared (see ProcessCommand()).
-    if (!session.stage)
-    {
-        SendAck(session, command.origin, command.request_id, false, "apply_failed");
-        return;
-    }
-
-    bool ok = false;
-    {
-        const AuthoringScope authoring({&session, command.origin});
-
-        // TODO(payload prims): author the arc into the session layer, for
-        // example AddPayload() / ClearPayloads() on the prim's UsdPayloads.
-        // For the implementation:
-        //  - Asset paths authored into the session layer are anchored to the
-        //    sidecar in the sessions directory, not to the root file. Resolve
-        //    the client's path against the root file and author it absolute
-        //    or relative to the sidecar.
-        //  - Loading the payload parses its file on this worker. Open it off
-        //    the worker pool first (for example keep a UsdStage on it alive
-        //    in the command), so only the recompose runs here.
-        //  - What the listener broadcasts for the resulting resync, and the
-        //    message clients receive, is not defined yet.
-        IDTX_LOG(IDTX_WARN, "Session {}: {} payload on '{}' is not implemented yet.",
-                 session.id, command.remove ? "removing a" : "adding a", command.prim_path);
-    }
-
-    // Whatever was authored, the stage may now compose different layers. A
-    // reload has to find this session for each of them; still under
-    // SharedLayers(), so no reload reads the list meanwhile.
-    RefreshUsedLayers(session);
-
-    if (ok) session.dirty.store(true, std::memory_order_relaxed);
-    SendAck(session, command.origin, command.request_id, ok, "not_implemented");
-}
-
 void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
 {
     if (!session.stage) return;
@@ -1490,14 +1459,67 @@ void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
 
             if (spec->GetSpecifier() != pxr::SdfSpecifierDef) continue;
 
-            const idtxcore::PrimType type =
+            idtxcore::PrimType type =
                 PrimDispatcher::TypeFromName(spec->GetTypeName().GetString());
-            if (type == idtxcore::PRIM_TYPE_UNSPECIFIED) continue;
 
             CreatedPrim created;
             created.name      = p.GetName();
             created.prim_path = p.GetString();
-            PrimDispatcher::ReadSchemaDefaults(type, created);
+
+            if (type != idtxcore::PRIM_TYPE_UNSPECIFIED)
+            {
+                PrimDispatcher::ReadSchemaDefaults(type, created);
+            }
+            else
+            {
+                // A typeless `def` carrying a reference or payload arc is a
+                // reference prim (TypeFromName does not recognise it). Replay it
+                // as PRIM_TYPE_REF, re-anchoring the authored (sidecar-
+                // relative) asset path to the broadcast (root-relative) form.
+                // AddReference/AddPayload author into the prepended list by
+                // default; read that bucket first and fall back to the others.
+                // Iterating an SdfListProxy is a read — never assign through it
+                // (SdfListProxy::operator= would edit the layer).
+                const auto first = [](const auto& list_proxy, auto& out) -> bool
+                {
+                    for (const auto& item : list_proxy.GetPrependedItems()) { out = item; return true; }
+                    for (const auto& item : list_proxy.GetAppendedItems())  { out = item; return true; }
+                    for (const auto& item : list_proxy.GetExplicitItems())  { out = item; return true; }
+                    return false;
+                };
+
+                pxr::SdfReference ref0;
+                pxr::SdfPayload   pay0;
+                const bool has_ref = first(spec->GetReferenceList(), ref0);
+                const bool has_pay = !has_ref && first(spec->GetPayloadList(), pay0);
+                if (!has_ref && !has_pay) continue; // nothing to replay
+
+                type            = idtxcore::PRIM_TYPE_REF;
+                created.has_ref = true;
+
+                std::string  authored_asset;
+                pxr::SdfPath ref_prim;
+                if (has_ref)
+                {
+                    created.ref_type = idtxcore::PRIM_REF_REFERENCE;
+                    authored_asset   = ref0.GetAssetPath();
+                    ref_prim         = ref0.GetPrimPath();
+                }
+                else
+                {
+                    created.ref_type = idtxcore::PRIM_REF_PAYLOAD;
+                    authored_asset   = pay0.GetAssetPath();
+                    ref_prim         = pay0.GetPrimPath();
+                }
+
+                const std::string broadcast_asset = ReferencePathResolver::AuthoredToBroadcast(
+                    authored_asset,
+                    std::filesystem::path(session_layer->GetRealPath()).parent_path(),
+                    std::filesystem::path(session.stage->GetRootLayer()->GetRealPath()).parent_path());
+                created.reference_path =
+                    ReferencePathResolver::JoinAssetAndPrim(broadcast_asset, ref_prim);
+            }
+
             create_frames.emplace_back(
                 p.GetPathElementCount(),
                 SerializeCreatePrimBroadcast(

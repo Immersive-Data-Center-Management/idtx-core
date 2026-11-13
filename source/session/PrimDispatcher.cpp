@@ -1,26 +1,45 @@
 #include "PrimDispatcher.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 
+#include <pxr/base/gf/matrix4d.h>
+#include <pxr/base/gf/rotation.h>
+#include <pxr/base/gf/transform.h>
+#include <pxr/base/gf/vec3d.h>
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/base/tf/type.h>
 #include <pxr/base/vt/value.h>
+#include <pxr/usd/pcp/layerStack.h>
+#include <pxr/usd/pcp/node.h>
+#include <pxr/usd/pcp/primIndex.h>
+#include <pxr/usd/pcp/types.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/payload.h>
 #include <pxr/usd/sdf/primSpec.h>
+#include <pxr/usd/sdf/reference.h>
+#include <pxr/usd/usd/payloads.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/primDefinition.h>
+#include <pxr/usd/usd/editTarget.h>
+#include <pxr/usd/usd/references.h>
 #include <pxr/usd/usd/schemaRegistry.h>
 #include <pxr/usd/usdGeom/capsule.h>
 #include <pxr/usd/usdGeom/cone.h>
 #include <pxr/usd/usdGeom/cube.h>
 #include <pxr/usd/usdGeom/cylinder.h>
 #include <pxr/usd/usdGeom/gprim.h>
+#include <pxr/usd/usdGeom/plane.h>
 #include <pxr/usd/usdGeom/sphere.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xform.h>
+#include <pxr/usd/usdGeom/xformable.h>
+#include <pxr/usd/usdGeom/xformOp.h>
+
+#include "ReferencePathResolver.h"
 
 namespace idtx
 {
@@ -44,6 +63,7 @@ pxr::TfType UsdSchemaType(idtxcore::PrimType type)
         case idtxcore::PRIM_TYPE_CONE:     return pxr::TfType::Find<pxr::UsdGeomCone>();
         case idtxcore::PRIM_TYPE_CYLINDER: return pxr::TfType::Find<pxr::UsdGeomCylinder>();
         case idtxcore::PRIM_TYPE_CAPSULE:  return pxr::TfType::Find<pxr::UsdGeomCapsule>();
+        case idtxcore::PRIM_TYPE_PLANE:    return pxr::TfType::Find<pxr::UsdGeomPlane>();
         case idtxcore::PRIM_TYPE_XFORM:    return pxr::TfType::Find<pxr::UsdGeomXform>();
         case idtxcore::PRIM_TYPE_UNSPECIFIED:
         default:                           return pxr::TfType();
@@ -121,27 +141,129 @@ bool AuthorPrim(const pxr::UsdStageRefPtr& stage,
     return static_cast<bool>(stage->DefinePrim(path, type_name));
 }
 
-// True if every opinion contributing to @p prim lives on the stage's local
-// layers (its root layer or this session's layer) and nowhere else. A prim
-// introduced across a reference or payload, or defined in a sublayer, has at
-// least one contributing spec on a foreign layer and so is NOT locally
-// deletable: its definition cannot be masked by a session-layer `active=false`
-// in a way we can later fold into the committed root file. Covers both a
-// root-authored prim (spec on the root layer, plus our session overrides) and
-// a prim created earlier this session (spec only on the session layer).
+// Build the LOCAL GfMatrix4d carried by @p req. Returns false when the
+// request carries no transform. A Matrix4dTransform is loaded verbatim (same
+// row ordering ApplyMatrix uses); a SeparateTransform is composed scale ->
+// rotateXYZ -> translate via GfTransform, matching UsdGeomXformCommonAPI's
+// RotationOrderXYZ convention (verified by PrimDispatcherTests). Uses the
+// per-field has_* accessors so it is independent of the oneof's name.
+bool LocalMatrixFromRequest(const idtxcore::CreatePrimRequest& req, pxr::GfMatrix4d& out)
+{
+    if (req.has_matrix())
+    {
+        const auto& m = req.matrix();
+        out = pxr::GfMatrix4d(
+            m.m00(), m.m01(), m.m02(), m.m03(),
+            m.m10(), m.m11(), m.m12(), m.m13(),
+            m.m20(), m.m21(), m.m22(), m.m23(),
+            m.m30(), m.m31(), m.m32(), m.m33());
+        return true;
+    }
+    if (req.has_seperate())
+    {
+        const auto& s  = req.seperate();
+        const auto& t  = s.translation();
+        const auto& r  = s.rotation();
+        const auto& sc = s.scale();
+
+        pxr::GfTransform xf;
+        xf.SetScale(pxr::GfVec3d(sc.x(), sc.y(), sc.z()));
+        xf.SetRotation(pxr::GfRotation(pxr::GfVec3d::XAxis(), r.x())
+                     * pxr::GfRotation(pxr::GfVec3d::YAxis(), r.y())
+                     * pxr::GfRotation(pxr::GfVec3d::ZAxis(), r.z()));
+        xf.SetTranslation(pxr::GfVec3d(t.x(), t.y(), t.z()));
+        out = xf.GetMatrix();
+        return true;
+    }
+    return false;
+}
+
+// Author @p local_matrix as the LOCAL transform of @p prim relative to its
+// parent, verbatim. Authored as a single matrix xformOp:transform so it
+// round-trips through TransformDispatcher::ReadAuthoredLocalTransform. Returns
+// false if the prim is not xformable (e.g. a reference to a non-xformable
+// prim); callers treat that as non-fatal.
+bool AuthorLocalTransform(const pxr::UsdPrim& prim,
+                          const pxr::GfMatrix4d& local_matrix)
+{
+    pxr::UsdGeomXformable xformable(prim);
+    if (!xformable) return false;
+
+    // No SdfChangeBlock: this is Usd-level authoring (SetXformOpOrder /
+    // AddTransformOp read the composed op order), which USD advises against
+    // inside a change block. The caller's create_in_progress flag already
+    // suppresses the notice, so there is nothing to coalesce.
+    xformable.SetXformOpOrder({}, /*resetXformStack=*/false);
+    pxr::UsdGeomXformOp op = xformable.AddTransformOp(pxr::UsdGeomXformOp::PrecisionDouble);
+    if (!op) return false;
+    op.Set(local_matrix);
+    return true;
+}
+
+// True if @p prim's existence was authored locally — on the stage's root layer
+// or this session's layer — so it can be masked with a session-layer
+// `active=false` and later folded into the committed root file. A prim defined
+// in a sublayer, or introduced across a reference/payload authored on an
+// ancestor, is NOT locally deletable: its definition is owed to a foreign
+// layer we cannot fold away.
+//
+// The subtlety is a *reference prim* we created this session: a typeless def on
+// the local layer that carries a reference or payload arc. Its composed prim
+// stack includes the target's specs on the referenced layer, so a naive
+// "every spec is on a local layer" test wrongly rejects it. Those foreign
+// specs are the prim's own reference content and must be ignored.
+//
+// So the check walks the prim's composition graph (Pcp) node by node instead
+// of its flattened spec stack. A node whose opinions reach the prim through a
+// reference or payload authored directly on the prim (PcpNodeRef::
+// IsDueToAncestor() is false) — and every node beneath it — is the prim's own
+// reference content and is accepted. Every other contributing node must draw
+// its opinions only from the root or session layer: a spec on a sublayer, or
+// any opinion pulled across an ancestral arc (reference/payload/inherit/
+// specialize/variant), makes the prim non-locally-deletable.
 bool IsLocallyDeletable(const pxr::UsdPrim& prim,
                         const pxr::SdfLayerHandle& root_layer,
                         const pxr::SdfLayerHandle& session_layer)
 {
-    const pxr::SdfPrimSpecHandleVector stack = prim.GetPrimStack();
-    if (stack.empty()) return false;
-    for (const pxr::SdfPrimSpecHandle& spec : stack)
+    const pxr::PcpPrimIndex& index = prim.GetPrimIndex();
+    if (!index.IsValid()) return false;
+
+    for (const pxr::PcpNodeRef& node : index.GetNodeRange())
     {
-        if (!spec) continue;
-        const pxr::SdfLayerHandle layer = spec->GetLayer();
-        if (layer != root_layer && layer != session_layer) return false;
+        if (!node.HasSpecs()) continue;
+
+        // Is this node reached through a reference or payload authored directly
+        // on the prim (not inherited from a namespace ancestor)? Walk up the
+        // graph: if any node on the path to the root is such an arc, every spec
+        // here is the prim's own reference content and is fine.
+        bool own_reference_content = false;
+        for (pxr::PcpNodeRef n = node; n; n = n.GetParentNode())
+        {
+            const pxr::PcpArcType arc = n.GetArcType();
+            if ((arc == pxr::PcpArcTypeReference || arc == pxr::PcpArcTypePayload)
+                && !n.IsDueToAncestor())
+            {
+                own_reference_content = true;
+                break;
+            }
+        }
+        if (own_reference_content) continue;
+
+        // Otherwise this node contributes a local or ancestral opinion. It is
+        // acceptable only when its spec lives on the root or session layer; a
+        // spec on any other layer in its layer stack (a sublayer, or a layer
+        // pulled across an ancestral arc) is foreign and cannot be folded away.
+        for (const pxr::SdfLayerRefPtr& layer : node.GetLayerStack()->GetLayers())
+        {
+            const pxr::SdfLayerHandle handle(layer);
+            if (handle == root_layer || handle == session_layer) continue;
+            if (layer->HasSpec(node.GetPath())) return false;
+        }
     }
-    return true;
+
+    // A prim with no authored specs anywhere (e.g. a pure composition artifact)
+    // is not something we can delete locally.
+    return !prim.GetPrimStack().empty();
 }
 
 } // namespace
@@ -153,6 +275,7 @@ idtxcore::PrimType PrimDispatcher::TypeFromName(const std::string& type_name)
     if (type_name == "Cone")     return idtxcore::PRIM_TYPE_CONE;
     if (type_name == "Cylinder") return idtxcore::PRIM_TYPE_CYLINDER;
     if (type_name == "Capsule")  return idtxcore::PRIM_TYPE_CAPSULE;
+    if (type_name == "Plane")    return idtxcore::PRIM_TYPE_PLANE;
     if (type_name == "Xform")    return idtxcore::PRIM_TYPE_XFORM;
     return idtxcore::PRIM_TYPE_UNSPECIFIED;
 }
@@ -196,6 +319,14 @@ void PrimDispatcher::ReadAttributes(const pxr::UsdPrim& prim,
             if ((out.has_axis = cap.GetAxisAttr().Get(&axis))) out.axis = axis.GetString();
             break;
         }
+        case idtxcore::PRIM_TYPE_PLANE:
+        {
+            pxr::UsdGeomPlane plane(prim);
+            out.has_width  = plane.GetWidthAttr().Get(&out.width);
+            out.has_length = plane.GetLengthAttr().Get(&out.length);
+            if ((out.has_axis = plane.GetAxisAttr().Get(&axis))) out.axis = axis.GetString();
+            break;
+        }
         case idtxcore::PRIM_TYPE_XFORM:        // a transform group has no shape attributes
         case idtxcore::PRIM_TYPE_UNSPECIFIED:
         default:
@@ -204,8 +335,8 @@ void PrimDispatcher::ReadAttributes(const pxr::UsdPrim& prim,
 }
 
 bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
-                            const std::string& parent_path,
-                            idtxcore::PrimType type,
+                            const idtxcore::CreatePrimRequest& req,
+                            const std::string& uploads_root,
                             CreatedPrim& out)
 {
     if (!stage)
@@ -214,12 +345,57 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
         return false;
     }
 
-    const pxr::TfToken base_name = BaseNameFor(type);
-    if (base_name.IsEmpty())
+    const std::string& parent_path = req.parent_path();
+    const idtxcore::PrimType type   = req.type();
+    const bool is_reference = (type == idtxcore::PRIM_TYPE_REF);
+
+    // Resolve the prim's base name and, for a reference prim, validate and
+    // re-anchor the reference path — all before anything is authored.
+    pxr::TfToken base_name;
+    ReferencePathResolver::Resolved resolved;
+    if (is_reference)
     {
-        IDTX_LOG(IDTX_WARN, "CreatePrimRequest with unknown prim type {}; ignoring.",
-                 static_cast<int>(type));
-        return false;
+        if (req.reference_path().empty())
+        {
+            IDTX_LOG(IDTX_WARN, "CreatePrimRequest of reference type without reference_path; ignoring.");
+            return false;
+        }
+
+        const pxr::SdfLayerHandle root_layer = stage->GetRootLayer();
+        const pxr::SdfLayerHandle edit_layer = stage->GetEditTarget().GetLayer();
+        if (!root_layer || !edit_layer)
+        {
+            IDTX_LOG(IDTX_ERROR, "CreatePrimRequest: stage has no root/edit layer; ignoring.");
+            return false;
+        }
+        const std::filesystem::path root_file(root_layer->GetRealPath());
+        const std::filesystem::path root_dir    = root_file.parent_path();
+        const std::filesystem::path sidecar_dir =
+            std::filesystem::path(edit_layer->GetRealPath()).parent_path();
+
+        const ReferencePathResolver::Status rs = ReferencePathResolver::Resolve(
+            req.reference_path(), std::filesystem::path(uploads_root),
+            root_dir, sidecar_dir, root_file, resolved);
+        if (rs != ReferencePathResolver::Status::Ok)
+        {
+            IDTX_LOG(IDTX_WARN, "CreatePrimRequest reference_path '{}' rejected: {}.",
+                     req.reference_path(), ReferencePathResolver::StatusToString(rs));
+            return false;
+        }
+
+        const std::string stem = std::filesystem::path(resolved.authored_asset).stem().string();
+        const std::string ident = pxr::TfMakeValidIdentifier(stem);
+        base_name = pxr::TfToken(ident.empty() ? "Ref" : ident);
+    }
+    else
+    {
+        base_name = BaseNameFor(type);
+        if (base_name.IsEmpty())
+        {
+            IDTX_LOG(IDTX_WARN, "CreatePrimRequest with unknown prim type {}; ignoring.",
+                     static_cast<int>(type));
+            return false;
+        }
     }
 
     if (parent_path.empty() || !pxr::SdfPath::IsValidPathString(parent_path))
@@ -255,9 +431,10 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
         return false;
     }
 
-    // Gprims may not be nested under another gprim. Xform has no such rule and
+    // Gprims may not be nested under another Gprim. As references are liekly to contain GPrims
+    // they are shall also never be nested under another Gprim. Xform has no such rule and
     // may be parented under any valid prim, so it skips this check.
-    if (IsGprimType(type) && HasGprimAncestor(parent_prim))
+    if ((IsGprimType(type) || is_reference)&& HasGprimAncestor(parent_prim))
     {
         IDTX_LOG(IDTX_WARN,
                  "CreatePrimRequest parent '{}' is or descends from a gprim; "
@@ -271,24 +448,72 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
         const pxr::SdfPath child = UniqueChildPath(stage, parent, base_name.GetString(), out.name);
         out.prim_path = child.GetString();
 
-        // No SdfChangeBlock here: defining a prim is Usd-level authoring, which
-        // USD advises against performing inside a change block. The resync
-        // notice this fires is suppressed by the caller's authoring context
-        // (AuthoringContext::creating), so coalescing notices buys nothing.
-        if (!AuthorPrim(stage, child, type))
+        // No SdfChangeBlock around the define/arc authoring: defining a prim and
+        // adding a composition arc are Usd-level operations USD advises against
+        // performing inside a change block. The resync notices they fire are
+        // suppressed by the caller's create_in_progress flag.
+        if (is_reference)
         {
-            IDTX_LOG(IDTX_ERROR, "Failed to author {} at '{}'.", base_name.GetString(), out.prim_path);
-            return false;
+            const pxr::UsdPrim prim = stage->DefinePrim(child); // typeless def
+            if (!prim)
+            {
+                IDTX_LOG(IDTX_ERROR, "Failed to author reference prim at '{}'.", out.prim_path);
+                return false;
+            }
+
+            const bool payload =
+                req.has_ref_type() && req.ref_type() == idtxcore::PRIM_REF_PAYLOAD;
+            bool arc_ok = false;
+            if (payload)
+                arc_ok = prim.GetPayloads().AddPayload(
+                    pxr::SdfPayload(resolved.authored_asset, resolved.prim_path));
+            else
+                arc_ok = prim.GetReferences().AddReference(
+                    pxr::SdfReference(resolved.authored_asset, resolved.prim_path));
+
+            if (!arc_ok)
+            {
+                IDTX_LOG(IDTX_ERROR, "Failed to author {} arc on '{}'.",
+                         payload ? "payload" : "reference", out.prim_path);
+                return false;
+            }
+
+            out.has_ref        = true;
+            out.ref_type       = payload ? idtxcore::PRIM_REF_PAYLOAD : idtxcore::PRIM_REF_REFERENCE;
+            out.reference_path = resolved.broadcast_path;
+        }
+        else
+        {
+            if (!AuthorPrim(stage, child, type))
+            {
+                IDTX_LOG(IDTX_ERROR, "Failed to author {} at '{}'.", base_name.GetString(), out.prim_path);
+                return false;
+            }
+            // Read the (fallback) default attributes authored for the type.
+            ReadAttributes(stage->GetPrimAtPath(child), type, out);
         }
 
-        // Read the (fallback) default attributes authored for the type.
-        ReadAttributes(stage->GetPrimAtPath(child), type, out);
+        // Optional local transform: author it verbatim as the prim's local
+        // transform relative to its parent. Applies to every prim type.
+        pxr::GfMatrix4d local;
+        if (LocalMatrixFromRequest(req, local))
+        {
+            const pxr::UsdPrim prim = stage->GetPrimAtPath(child);
+            if (!AuthorLocalTransform(prim, local))
+            {
+                IDTX_LOG(IDTX_WARN,
+                         "CreatePrimRequest carried a transform but '{}' is not xformable; "
+                         "prim created without it.",
+                         out.prim_path);
+            }
+        }
+
         return true;
     }
     catch (const std::exception& e)
     {
-        IDTX_LOG(IDTX_ERROR, "Exception while creating {} under '{}': {}",
-                 base_name.GetString(), parent_path, e.what());
+        IDTX_LOG(IDTX_ERROR, "Exception while creating prim under '{}': {}",
+                 parent_path, e.what());
         return false;
     }
 }
@@ -344,6 +569,20 @@ PrimDispatcher::SetActiveStatus PrimDispatcher::SetActive(const pxr::UsdStageRef
     // reactivating (undo) only requires that the prim exists, which it does.
     if (!active)
     {
+        // The stage's default prim (named in the root layer's defaultPrim
+        // metadata) is the composition entry point for anyone referencing this
+        // stage; deleting/deactivating it would break those references. Refuse.
+        const pxr::SdfLayerHandle root_layer = stage->GetRootLayer();
+        if (root_layer && root_layer->HasDefaultPrim() &&
+            path == pxr::SdfPath::AbsoluteRootPath().AppendChild(root_layer->GetDefaultPrim()))
+        {
+            IDTX_LOG(IDTX_WARN,
+                     "SetPrimActiveRequest cannot delete '{}': it is the stage's default prim. "
+                     "Ignoring.",
+                     prim_path);
+            return SetActiveStatus::NotDeletable;
+        }
+
         if (!IsLocallyDeletable(prim, stage->GetRootLayer(), stage->GetSessionLayer()))
         {
             IDTX_LOG(IDTX_WARN,
@@ -406,6 +645,19 @@ void PrimDispatcher::ReadSchemaDefaults(idtxcore::PrimType type, CreatedPrim& ou
         {
             out.has_height = get_double(pxr::UsdGeomTokens->height, out.height);
             out.has_radius = get_double(pxr::UsdGeomTokens->radius, out.radius);
+            pxr::VtValue axis;
+            if (def->GetAttributeFallbackValue(pxr::UsdGeomTokens->axis, &axis)
+                && axis.IsHolding<pxr::TfToken>())
+            {
+                out.axis = axis.UncheckedGet<pxr::TfToken>().GetString();
+                out.has_axis = true;
+            }
+            break;
+        }
+        case idtxcore::PRIM_TYPE_PLANE:
+        {
+            out.has_width  = get_double(pxr::UsdGeomTokens->width, out.width);
+            out.has_length = get_double(pxr::UsdGeomTokens->length, out.length);
             pxr::VtValue axis;
             if (def->GetAttributeFallbackValue(pxr::UsdGeomTokens->axis, &axis)
                 && axis.IsHolding<pxr::TfToken>())

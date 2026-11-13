@@ -62,6 +62,59 @@ std::string BuildCreatePrimRequest(const std::string& session_id,
     return out;
 }
 
+std::string BuildCreatePrimRequestWithTranslate(const std::string& session_id,
+                                                const std::string& parent_path,
+                                                idtxcore::PrimType type,
+                                                double tx, double ty, double tz,
+                                                const std::uint64_t request_id)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session_id);
+    msg.set_request_id(request_id);
+
+    auto* req = msg.mutable_create_prim();
+    req->set_session_id(session_id);
+    req->set_parent_path(parent_path);
+    req->set_type(type);
+
+    auto* sep = req->mutable_seperate();
+    sep->mutable_translation()->set_x(tx);
+    sep->mutable_translation()->set_y(ty);
+    sep->mutable_translation()->set_z(tz);
+    sep->mutable_rotation()->set_x(0.0);
+    sep->mutable_rotation()->set_y(0.0);
+    sep->mutable_rotation()->set_z(0.0);
+    sep->mutable_scale()->set_x(1.0);
+    sep->mutable_scale()->set_y(1.0);
+    sep->mutable_scale()->set_z(1.0);
+
+    std::string out;
+    msg.SerializeToString(&out);
+    return out;
+}
+
+std::string BuildCreatePrimReferenceRequest(const std::string& session_id,
+                                            const std::string& parent_path,
+                                            idtxcore::PrimRefType ref_type,
+                                            const std::string& reference_path,
+                                            const std::uint64_t request_id)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session_id);
+    msg.set_request_id(request_id);
+
+    auto* req = msg.mutable_create_prim();
+    req->set_session_id(session_id);
+    req->set_parent_path(parent_path);
+    req->set_type(idtxcore::PRIM_TYPE_REF);
+    req->set_ref_type(ref_type);
+    req->set_reference_path(reference_path);
+
+    std::string out;
+    msg.SerializeToString(&out);
+    return out;
+}
+
 std::string BuildSetPrimActiveRequest(const std::string& session_id,
                                       const std::string& prim_path,
                                       bool active,

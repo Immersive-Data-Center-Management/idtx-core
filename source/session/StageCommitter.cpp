@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -17,6 +18,8 @@
 #include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/sdf/zipFile.h>
 #include <pxr/usd/usdUtils/flattenLayerStack.h>
+
+#include "ReferencePathResolver.h"
 
 namespace fs = std::filesystem;
 
@@ -97,6 +100,30 @@ void RemoveSoftDeletedPrims(const pxr::UsdStageRefPtr& stage,
 
 } // namespace
 
+// Build the asset-path resolver passed to UsdUtilsFlattenLayerStack. USD's
+// default resolver absolutizes every layer-relative asset path (it cannot know
+// where the flattened layer will be written), which would bake server
+// filesystem paths into the committed file. Since we know the committed file's
+// directory @p dest_dir, we re-express any absolute result as a clean, portable
+// layer-relative path (`./...` or `../...`) via the same anchoring helper the
+// live-sync resolver uses. Paths the default leaves as search paths or
+// package-internal references (non-absolute), and anything with no relative
+// relation to @p dest_dir (e.g. a different drive), fall through unchanged.
+static pxr::UsdUtilsResolveAssetPathFn MakeRootRelativeResolver(const fs::path& dest_dir)
+{
+    return [dest_dir](const pxr::SdfLayerHandle& sourceLayer,
+                      const std::string& assetPath) -> std::string
+    {
+        const std::string def =
+            pxr::UsdUtilsFlattenLayerStackResolveAssetPath(sourceLayer, assetPath);
+        if (!fs::path(def).is_absolute()) return def; // search path / package-internal
+
+        const std::string rel = ReferencePathResolver::ToAnchoredRelative(fs::path(def), dest_dir);
+        return rel.empty() ? def : rel; // "" => unrelated (e.g. other drive): keep absolute
+    };
+}
+
+
 bool StageCommitter::Commit(const pxr::UsdStageRefPtr& stage,
                             const std::string& original_path,
                             std::string& out_error)
@@ -116,8 +143,12 @@ bool StageCommitter::CommitFlat(const pxr::UsdStageRefPtr& stage,
                                 std::string& out_error)
 {
     // Merge the composed layer stack (sidecar session layer over the root
-    // layer stack) into a single layer, preserving all composition arcs.
-    pxr::SdfLayerRefPtr merged = pxr::UsdUtilsFlattenLayerStack(stage);
+    // layer stack) into a single layer, preserving all composition arcs. The
+    // custom resolver re-anchors asset paths to the committed file's directory
+    // instead of absolutizing them (USD's default).
+    const fs::path dst(original_path);
+    pxr::SdfLayerRefPtr merged =
+        pxr::UsdUtilsFlattenLayerStack(stage, MakeRootRelativeResolver(dst.parent_path()));
     if (!merged)
     {
         out_error = "UsdUtilsFlattenLayerStack returned null";
@@ -131,7 +162,6 @@ bool StageCommitter::CommitFlat(const pxr::UsdStageRefPtr& stage,
     // Write to a temp sibling first, then atomically rename over the original
     // so a failed/partial export can never truncate the source file. Preserve
     // the original extension so the on-disk encoding (.usda vs .usdc) is kept.
-    const fs::path dst(original_path);
     const fs::path tmp = dst.parent_path() /
         ("." + dst.stem().string() + "_idtx_commit" + dst.extension().string());
 
@@ -164,7 +194,10 @@ bool StageCommitter::CommitUsdz(const pxr::UsdStageRefPtr& stage,
                                 const std::string& original_path,
                                 std::string& out_error)
 {
-    pxr::SdfLayerRefPtr merged = pxr::UsdUtilsFlattenLayerStack(stage);
+    // External (non-package) references are re-anchored relative to the usdz
+    // package's directory; package-internal paths fall through unchanged.
+    pxr::SdfLayerRefPtr merged = pxr::UsdUtilsFlattenLayerStack(
+        stage, MakeRootRelativeResolver(fs::path(original_path).parent_path()));
     if (!merged)
     {
         out_error = "UsdUtilsFlattenLayerStack returned null";

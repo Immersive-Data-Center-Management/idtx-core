@@ -229,9 +229,8 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
             // type/parent it acks not-ok. Only a queue the session could not
             // accept the request onto is answered here.
             const std::uint64_t request_id = msg.request_id();
-            const idtxcore::CreatePrimRequest& req = msg.create_prim();
             const auto status = m_manager_->SubmitCreatePrimCommand(
-                ws_data->session_id, req.parent_path(), req.type(),
+                ws_data->session_id, msg.create_prim(),
                 ws_data->connection_id, request_id);
             if (status == SubmitStatus::Accepted) break;
 
