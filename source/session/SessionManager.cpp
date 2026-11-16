@@ -1514,7 +1514,6 @@ void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
 
                 const std::string broadcast_asset = ReferencePathResolver::AuthoredToBroadcast(
                     authored_asset,
-                    std::filesystem::path(session_layer->GetRealPath()).parent_path(),
                     std::filesystem::path(session.stage->GetRootLayer()->GetRealPath()).parent_path());
                 created.reference_path =
                     ReferencePathResolver::JoinAssetAndPrim(broadcast_asset, ref_prim);

@@ -53,7 +53,6 @@ ReferencePathResolver::Status ReferencePathResolver::Resolve(
     const std::string& reference_path,
     const fs::path& uploads_root,
     const pxr::SdfLayerHandle& root_layer,
-    const fs::path& sidecar_dir,
     Resolved& out)
 {
     if (!root_layer)
@@ -188,20 +187,28 @@ ReferencePathResolver::Status ReferencePathResolver::Resolve(
     // out.prim_path keeps the AUTHORED prim path (empty == defaultPrim); it must
     // not be overwritten with the resolved defaultPrim, so the authored
     // SdfReference/SdfPayload keeps meaning "use the layer's defaultPrim".
-    out.authored_asset = ToAnchoredRelative(target_abs, sidecar_dir);
+    //
+    // The authored asset is the absolute on-disk target. The sidecar is
+    // server-only and ephemeral, so an absolute path never leaves the server:
+    // USD composes it directly during the live session, the commit re-anchors it
+    // relative to the written file (StageCommitter), and the broadcast form below
+    // is already root-relative. Absolute also sidesteps the cross-drive case
+    // (Windows uploads and sessions on different drives), where a sidecar-relative
+    // path does not exist and would otherwise silently become an empty asset path
+    // (a USD internal reference) instead of a valid external arc.
+    out.authored_asset = target_abs.generic_string();
     out.prim_path      = prim_path;
     out.broadcast_path = JoinAssetAndPrim(ToAnchoredRelative(target_abs, root_dir), prim_path);
     return Status::Ok;
 }
 
 std::string ReferencePathResolver::AuthoredToBroadcast(const std::string& authored_asset_path,
-                                                       const fs::path& sidecar_dir,
                                                        const fs::path& root_layer_dir)
 {
-    // The authored path is relative to the sidecar layer; resolve it to the
-    // on-disk target, then re-express it relative to the root layer.
-    const fs::path target_abs = Normalise(Normalise(sidecar_dir) / authored_asset_path);
-    return ToAnchoredRelative(target_abs, root_layer_dir);
+    // The authored path is the absolute on-disk target (see Resolve); re-express
+    // it relative to the root layer for broadcast. ToAnchoredRelative normalises
+    // the target itself, so the absolute path is handed straight through.
+    return ToAnchoredRelative(authored_asset_path, root_layer_dir);
 }
 
 const char* ReferencePathResolver::StatusToString(Status s) noexcept

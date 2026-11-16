@@ -334,19 +334,21 @@ void PrimDispatcher::ReadAttributes(const pxr::UsdPrim& prim,
     }
 }
 
+// The returned string is the client-facing ack error code, so it follows the
+// protocol's snake_case convention.
 const char* PrimDispatcher::CreatePrimStatusToString(CreatePrimStatus status) noexcept
 {
     switch (status)
     {
-        case CreatePrimStatus::Ok:                  return "Ok";
-        case CreatePrimStatus::InvalidStage:        return "InvalidStage";
-        case CreatePrimStatus::InvalidType:         return "InvalidType";
-        case CreatePrimStatus::InvalidParent:       return "InvalidParent";
-        case CreatePrimStatus::InvalidReference:    return "InvalidReference";
-        case CreatePrimStatus::Failed:              return "Failed";
+        case CreatePrimStatus::Ok:                  return "ok";
+        case CreatePrimStatus::InvalidStage:        return "invalid_stage";
+        case CreatePrimStatus::InvalidType:         return "invalid_type";
+        case CreatePrimStatus::InvalidParent:       return "invalid_parent";
+        case CreatePrimStatus::InvalidReference:    return "invalid_reference";
+        case CreatePrimStatus::Failed:              return "author_failed";
     }
-    
-    return "Unknown";
+
+    return "unknown";
 }
 
 PrimDispatcher::CreatePrimStatus PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
@@ -377,18 +379,15 @@ PrimDispatcher::CreatePrimStatus PrimDispatcher::Create(const pxr::UsdStageRefPt
         }
 
         const pxr::SdfLayerHandle root_layer = stage->GetRootLayer();
-        const pxr::SdfLayerHandle edit_layer = stage->GetEditTarget().GetLayer();
-        if (!root_layer || !edit_layer)
+        if (!root_layer)
         {
-            IDTX_LOG(IDTX_ERROR, "CreatePrimRequest: stage has no root/edit layer; ignoring.");
+            IDTX_LOG(IDTX_ERROR, "CreatePrimRequest: stage has no root layer; ignoring.");
             return CreatePrimStatus::InvalidStage;
         }
-        const std::filesystem::path sidecar_dir =
-            std::filesystem::path(edit_layer->GetRealPath()).parent_path();
 
         const ReferencePathResolver::Status rs = ReferencePathResolver::Resolve(
             req.reference_path(), std::filesystem::path(uploads_root),
-            root_layer, sidecar_dir, resolved);
+            root_layer, resolved);
         if (rs != ReferencePathResolver::Status::Ok)
         {
             IDTX_LOG(IDTX_WARN, "CreatePrimRequest reference_path '{}' rejected: {}.",

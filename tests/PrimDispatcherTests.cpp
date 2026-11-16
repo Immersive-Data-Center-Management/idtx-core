@@ -68,7 +68,8 @@ TEST_CASE("Create authors the request transform as the prim's local transform (m
     m->set_m30(1); m->set_m31(2); m->set_m32(3); m->set_m33(1);
 
     CreatedPrim out;
-    REQUIRE(PrimDispatcher::Create(stage, req, /*uploads_root=*/"", out));
+    REQUIRE(PrimDispatcher::Create(stage, req, /*uploads_root=*/"", out)
+            == PrimDispatcher::CreatePrimStatus::Ok);
 
     // The transform is authored verbatim as the prim's LOCAL transform, so the
     // composed world is the parent's world composed with it: (10,20,30)+(1,2,3).
@@ -96,7 +97,8 @@ TEST_CASE("Create separate-transform rotation matches UsdGeomXformCommonAPI Rota
     sep->mutable_scale()->set_x(s[0]);       sep->mutable_scale()->set_y(s[1]);       sep->mutable_scale()->set_z(s[2]);
 
     CreatedPrim out;
-    REQUIRE(PrimDispatcher::Create(stage, req, /*uploads_root=*/"", out));
+    REQUIRE(PrimDispatcher::Create(stage, req, /*uploads_root=*/"", out)
+            == PrimDispatcher::CreatePrimStatus::Ok);
 
     // Independent expectation: author the same vectors through the official
     // XformCommonAPI with RotationOrderXYZ and read the composed matrix.

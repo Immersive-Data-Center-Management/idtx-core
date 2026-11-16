@@ -8,11 +8,14 @@
  * that string into the three reference frames the system needs, all pointing at
  * the same on-disk asset under the uploads root:
  *
- *   - @e authored  : relative to the session sidecar layer (the stage's edit
- *                    target). This is what is authored into the layer, so USD
- *                    composes it correctly during the live session (the sidecar
- *                    lives in a sibling `sessions/` dir, so this is typically a
- *                    `../uploads/...` path).
+ *   - @e authored  : the absolute on-disk path of the target under the uploads
+ *                    root. This is what is authored into the session sidecar
+ *                    layer (the stage's edit target). The sidecar is server-only
+ *                    and ephemeral, so the absolute path never leaves the server:
+ *                    USD composes it directly during the live session, and the
+ *                    commit re-anchors it relative to the written file. Authoring
+ *                    it absolute (rather than sidecar-relative) avoids the
+ *                    cross-drive case where no relative path exists.
  *   - @e broadcast : relative to the stage's root layer (the shared USD file all
  *                    clients hold). This is what the server broadcasts, so each
  *                    client can re-anchor it to its own edit layer.
@@ -64,7 +67,7 @@ public:
     /** @brief The re-anchored forms of a validated reference. */
     struct Resolved
     {
-        std::string  authored_asset;  ///< Sidecar-relative asset path, NO prim suffix, '/' sep.
+        std::string  authored_asset;  ///< Absolute on-disk asset path, NO prim suffix, '/' sep.
         pxr::SdfPath prim_path;       ///< Target prim inside the asset (empty = defaultPrim).
         std::string  broadcast_path;  ///< Root-layer-relative wire form, `<prim>` suffix kept, '/' sep.
     };
@@ -83,14 +86,12 @@ public:
      * @param root_layer     The open stage's root layer. Supplies the anchor
      *                       directory for `./`/`../` asset paths and the identity
      *                       used by the self-reference guard. Must be non-null.
-     * @param sidecar_dir    Directory of the stage's edit-target (sidecar) layer.
      * @param out            Filled on Status::Ok.
      * @return The granular outcome; never throws.
      */
     static Status Resolve(const std::string& reference_path,
                           const std::filesystem::path& uploads_root,
                           const pxr::SdfLayerHandle& root_layer,
-                          const std::filesystem::path& sidecar_dir,
                           Resolved& out);
 
     /**
@@ -98,10 +99,11 @@ public:
      *        broadcast path. Used by the join snapshot, which reads the authored
      *        SdfReference/SdfPayload straight off the session layer.
      *
-     * @param authored_asset_path Asset path as authored in the sidecar (no `<prim>`).
+     * @param authored_asset_path Absolute on-disk asset path as authored in the
+     *                            sidecar (no `<prim>`; see Resolve).
+     * @param root_layer_dir      Directory of the stage's root layer.
      */
     static std::string AuthoredToBroadcast(const std::string& authored_asset_path,
-                                           const std::filesystem::path& sidecar_dir,
                                            const std::filesystem::path& root_layer_dir);
 
     /**

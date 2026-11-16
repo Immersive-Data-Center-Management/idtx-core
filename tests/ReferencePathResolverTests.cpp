@@ -2,7 +2,8 @@
 //
 // Unit tests of ReferencePathResolver: classification (absolute / stage-relative
 // / search-path), the uploads-root escape guard, existence + USD checks, the
-// <prim> suffix split, and the sidecar-vs-broadcast re-anchoring. No server or
+// <prim> suffix split, and the authored-vs-broadcast re-anchoring (authored is
+// the absolute on-disk target; broadcast is root-layer-relative). No server or
 // stage is involved; real temp files stand in for the uploads tree.
 
 #include "thirdparty/doctest/doctest.h"
@@ -83,12 +84,21 @@ struct Tree
         std::ofstream(p) << content;
     }
 
+    // The resolver normalises the target with weakly_canonical; mirror that here
+    // so authored-path assertions match regardless of temp-dir symlinks.
+    static std::string Canonical(const fs::path& p)
+    {
+        std::error_code ec;
+        const fs::path c = fs::weakly_canonical(p, ec);
+        return (ec ? p.lexically_normal() : c).generic_string();
+    }
+
     Status Resolve(const std::string& ref, ReferencePathResolver::Resolved& out) const
     {
         const pxr::SdfLayerRefPtr root_layer = pxr::SdfLayer::FindOrOpen(root_file.generic_string());
         REQUIRE(root_layer);
         return ReferencePathResolver::Resolve(ref, uploads, pxr::SdfLayerHandle(root_layer),
-                                              sidecar_dir, out);
+                                              out);
     }
 };
 
@@ -101,8 +111,8 @@ TEST_CASE("absolute path resolves against the uploads root")
     CHECK(t.Resolve("/kit/chair.usda", r) == Status::Ok);
     // Broadcast is relative to the root layer dir (uploads/).
     CHECK(r.broadcast_path == "./kit/chair.usda");
-    // Authored is relative to the sidecar dir (sessions/), climbing out with '..'.
-    CHECK(r.authored_asset == "../uploads/kit/chair.usda");
+    // Authored is the absolute on-disk target under the uploads root.
+    CHECK(r.authored_asset == Tree::Canonical(t.uploads / "kit" / "chair.usda"));
     CHECK(r.prim_path.IsEmpty());
 }
 
@@ -112,7 +122,7 @@ TEST_CASE("stage-relative ./ path resolves against the root layer dir")
     ReferencePathResolver::Resolved r;
     CHECK(t.Resolve("./kit/chair.usda", r) == Status::Ok);
     CHECK(r.broadcast_path == "./kit/chair.usda");
-    CHECK(r.authored_asset == "../uploads/kit/chair.usda");
+    CHECK(r.authored_asset == Tree::Canonical(t.uploads / "kit" / "chair.usda"));
 }
 
 TEST_CASE("bare search-path is rejected")
@@ -159,7 +169,7 @@ TEST_CASE("a <prim> suffix is parsed and preserved on the broadcast path")
     ReferencePathResolver::Resolved r;
     CHECK(t.Resolve("/kit/chair.usda</Geom/Seat>", r) == Status::Ok);
     CHECK(r.prim_path.GetString() == "/Geom/Seat");
-    CHECK(r.authored_asset == "../uploads/kit/chair.usda"); // asset only, no suffix
+    CHECK(r.authored_asset == Tree::Canonical(t.uploads / "kit" / "chair.usda")); // asset only, no suffix
     CHECK(r.broadcast_path == "./kit/chair.usda</Geom/Seat>");
 }
 
@@ -186,10 +196,12 @@ TEST_CASE("a layer without a defaultPrim is rejected when no <prim> is given")
     CHECK(t.Resolve("/kit/bare.usda", r) == Status::NoDefaultPrim);
 }
 
-TEST_CASE("AuthoredToBroadcast reverses the sidecar anchoring")
+TEST_CASE("AuthoredToBroadcast re-anchors an absolute authored path")
 {
+    // Resolve() authors the absolute on-disk target into the sidecar; the join
+    // snapshot must re-express it root-relative.
     Tree t;
     const std::string b = ReferencePathResolver::AuthoredToBroadcast(
-        "../uploads/kit/chair.usda", t.sidecar_dir, t.root_dir);
+        Tree::Canonical(t.uploads / "kit" / "chair.usda"), t.root_dir);
     CHECK(b == "./kit/chair.usda");
 }
