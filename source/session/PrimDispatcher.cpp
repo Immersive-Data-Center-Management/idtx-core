@@ -475,6 +475,9 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
             {
                 IDTX_LOG(IDTX_ERROR, "Failed to author {} arc on '{}'.",
                          payload ? "payload" : "reference", out.prim_path);
+                
+                // clean-up the created typeless def that would hold the reference/payload arc on failure.
+                stage->RemovePrim(prim.GetPrimPath());
                 return false;
             }
 
