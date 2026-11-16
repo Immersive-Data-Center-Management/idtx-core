@@ -49,6 +49,14 @@ std::string ReferencePathResolver::JoinAssetAndPrim(const std::string& asset_pat
     return asset_path + "<" + prim_path.GetString() + ">";
 }
 
+bool ReferencePathResolver::IsUnderRoot(const fs::path& target, const fs::path& root)
+{
+    const fs::path rel = Normalise(target).lexically_relative(Normalise(root));
+    // Empty => no relative relation at all (e.g. a different drive root); a
+    // leading ".." => the target climbs out of the root. Both are "outside".
+    return !rel.empty() && *rel.begin() != "..";
+}
+
 ReferencePathResolver::Status ReferencePathResolver::Resolve(
     const std::string& reference_path,
     const fs::path& uploads_root,
@@ -119,14 +127,12 @@ ReferencePathResolver::Status ReferencePathResolver::Resolve(
     }
 
     const fs::path target_abs  = Normalise(target);
-    const fs::path uploads_abs = Normalise(uploads_root);
 
     // ---- Escape guard: the resolved target must stay under the uploads root.
     // Checked on the resolved target (not the authored string, which legitimately
     // climbs out of sessions/ with `..`). Runs BEFORE the target is opened, so
     // a path outside the uploads tree is never touched.
-    const fs::path rel_to_root = target_abs.lexically_relative(uploads_abs);
-    if (rel_to_root.empty() || *rel_to_root.begin() == "..")
+    if (!IsUnderRoot(target_abs, uploads_root))
     {
         IDTX_LOG(IDTX_WARN, "reference_path '{}' escapes the uploads root; rejecting.", asset_str);
         return Status::OutsideRoot;

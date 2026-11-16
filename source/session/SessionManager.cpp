@@ -1672,7 +1672,8 @@ CommitResult SessionManager::CommitOverrides(Session& session)
     // Best-effort persist of the sidecar so its on-disk state matches what
     // we are about to fold into the original file.
     session_layer->Save();
-    if (!StageCommitter::Commit(session.stage, session.usd_file_absolute.string(), result.error))
+    if (!StageCommitter::Commit(session.stage, session.usd_file_absolute.string(),
+                                std::filesystem::path(m_locator_.GetRoot()), result.error))
     {
         result.status = CommitStatus::WriteFailed;
         return result;

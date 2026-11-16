@@ -124,6 +124,17 @@ public:
     static std::string ToAnchoredRelative(const std::filesystem::path& target,
                                           const std::filesystem::path& base);
 
+    /**
+     * @brief True when @p target, once normalised, resolves at or under @p root.
+     *        This is the uploads-root containment test shared by Resolve's escape
+     *        guard and StageCommitter's commit-time re-anchoring, so both agree on
+     *        exactly which paths are "server-hosted" and which are left untouched.
+     *        Both inputs are normalised first; a target on a different filesystem
+     *        root (e.g. another Windows drive) is treated as outside.
+     */
+    static bool IsUnderRoot(const std::filesystem::path& target,
+                            const std::filesystem::path& root);
+
     static const char* StatusToString(Status s) noexcept;
 };
 
