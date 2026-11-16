@@ -12,6 +12,8 @@
 #include <fstream>
 #include <string>
 
+#include <pxr/usd/sdf/layer.h>
+
 #include "session/ReferencePathResolver.h"
 
 using idtx::session::ReferencePathResolver;
@@ -25,7 +27,7 @@ using Status = ReferencePathResolver::Status;
 // A disposable uploads tree:
 //   <root>/uploads/              <- uploads root (root download folder)
 //   <root>/uploads/scene.usda    <- the open stage's root layer
-//   <root>/uploads/kit/chair.usda<- a reference target
+//   <root>/uploads/kit/chair.usda<- a reference target (defaultPrim + /Geom/Seat)
 //   <root>/sessions/             <- sibling sidecar dir (edit target lives here)
 struct Tree
 {
@@ -49,7 +51,20 @@ struct Tree
         fs::create_directories(uploads / "kit");
         fs::create_directories(sidecar_dir);
         Touch(root_file);
-        Touch(uploads / "kit" / "chair.usda");
+        // A real USD layer: defaultPrim "Geom" with a child "Seat", so the
+        // resolver's defaultPrim and <prim> existence checks have something to
+        // find.
+        Write(uploads / "kit" / "chair.usda",
+              "#usda 1.0\n"
+              "(\n"
+              "    defaultPrim = \"Geom\"\n"
+              ")\n"
+              "def Xform \"Geom\"\n"
+              "{\n"
+              "    def \"Seat\"\n"
+              "    {\n"
+              "    }\n"
+              "}\n");
     }
 
     ~Tree()
@@ -63,10 +78,17 @@ struct Tree
         std::ofstream(p) << "#usda 1.0\n";
     }
 
+    static void Write(const fs::path& p, const char* content)
+    {
+        std::ofstream(p) << content;
+    }
+
     Status Resolve(const std::string& ref, ReferencePathResolver::Resolved& out) const
     {
-        return ReferencePathResolver::Resolve(ref, uploads, root_dir, sidecar_dir,
-                                              root_file, out);
+        const pxr::SdfLayerRefPtr root_layer = pxr::SdfLayer::FindOrOpen(root_file.generic_string());
+        REQUIRE(root_layer);
+        return ReferencePathResolver::Resolve(ref, uploads, pxr::SdfLayerHandle(root_layer),
+                                              sidecar_dir, out);
     }
 };
 
@@ -113,7 +135,7 @@ TEST_CASE("a missing target is rejected")
 {
     Tree t;
     ReferencePathResolver::Resolved r;
-    CHECK(t.Resolve("/kit/missing.usda", r) == Status::NotFound);
+    CHECK(t.Resolve("/kit/missing.usda", r) == Status::LayerUnreadable);
 }
 
 TEST_CASE("a non-USD target is rejected")
@@ -121,7 +143,7 @@ TEST_CASE("a non-USD target is rejected")
     Tree t;
     Tree::Touch(t.uploads / "kit" / "note.txt");
     ReferencePathResolver::Resolved r;
-    CHECK(t.Resolve("/kit/note.txt", r) == Status::NotAUsdFile);
+    CHECK(t.Resolve("/kit/note.txt", r) == Status::LayerUnreadable);
 }
 
 TEST_CASE("referencing the session's own root layer is rejected")
@@ -146,6 +168,22 @@ TEST_CASE("a malformed <prim> suffix is rejected")
     Tree t;
     ReferencePathResolver::Resolved r;
     CHECK(t.Resolve("/kit/chair.usda<not-a-path>", r) == Status::InvalidPrimPath);
+}
+
+TEST_CASE("a <prim> suffix targeting a non-existent prim is rejected")
+{
+    Tree t;
+    ReferencePathResolver::Resolved r;
+    CHECK(t.Resolve("/kit/chair.usda</Geom/Nope>", r) == Status::PrimNotFound);
+}
+
+TEST_CASE("a layer without a defaultPrim is rejected when no <prim> is given")
+{
+    Tree t;
+    // A valid USD layer that declares no defaultPrim.
+    Tree::Touch(t.uploads / "kit" / "bare.usda");
+    ReferencePathResolver::Resolved r;
+    CHECK(t.Resolve("/kit/bare.usda", r) == Status::NoDefaultPrim);
 }
 
 TEST_CASE("AuthoredToBroadcast reverses the sidecar anchoring")

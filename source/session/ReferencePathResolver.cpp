@@ -2,7 +2,7 @@
 
 #include <system_error>
 
-#include "utils/UsdFileLocator.h"
+#include <pxr/usd/sdf/primSpec.h>
 
 namespace idtx
 {
@@ -52,11 +52,16 @@ std::string ReferencePathResolver::JoinAssetAndPrim(const std::string& asset_pat
 ReferencePathResolver::Status ReferencePathResolver::Resolve(
     const std::string& reference_path,
     const fs::path& uploads_root,
-    const fs::path& root_layer_dir,
+    const pxr::SdfLayerHandle& root_layer,
     const fs::path& sidecar_dir,
-    const fs::path& root_layer_file,
     Resolved& out)
 {
+    if (!root_layer)
+    {
+        IDTX_LOG(IDTX_ERROR, "ReferencePathResolver::Resolve called with a null root layer.");
+        return Status::LayerUnreadable;
+    }
+
     const std::string trimmed = Trim(reference_path);
 
     // ---- Split off an optional <prim> suffix -------------------------------
@@ -88,21 +93,25 @@ ReferencePathResolver::Status ReferencePathResolver::Resolve(
     if (asset_str.empty()) return Status::EmptyPath;
 
     // ---- Classify the asset path and locate the on-disk target -------------
+    // Server path policy (deliberately NOT USD semantics): a leading '/' is
+    // anchored at the uploads root, './' and '../' at the open stage's root
+    // layer, and a bare "folder/file.usd" (a USD search-path) is rejected. This
+    // mapping, together with the escape guard below, is security-relevant and is
+    // kept out of USD, which would treat '/abs' as a real filesystem path and
+    // happily resolve a path outside the uploads tree.
+    const fs::path root_dir = fs::path(root_layer->GetRealPath()).parent_path();
+
     fs::path target;
     if (asset_str.front() == '/')
     {
-        // "Absolute" against the uploads root (the root download folder).
         target = uploads_root / asset_str.substr(1);
     }
     else if (asset_str.rfind("./", 0) == 0 || asset_str.rfind("../", 0) == 0)
     {
-        // Relative to the open stage's root layer (the shared file).
-        target = root_layer_dir / asset_str;
+        target = root_dir / asset_str;
     }
     else
     {
-        // Bare "folder/file.usd": USD would treat this as a search-path-anchored
-        // asset path, which the server does not register. Reject.
         IDTX_LOG(IDTX_WARN,
                  "reference_path '{}' is a search-path-anchored asset path; rejecting "
                  "(use '/abs', './rel' or '../rel').",
@@ -115,7 +124,8 @@ ReferencePathResolver::Status ReferencePathResolver::Resolve(
 
     // ---- Escape guard: the resolved target must stay under the uploads root.
     // Checked on the resolved target (not the authored string, which legitimately
-    // climbs out of sessions/ with `..`).
+    // climbs out of sessions/ with `..`). Runs BEFORE the target is opened, so
+    // a path outside the uploads tree is never touched.
     const fs::path rel_to_root = target_abs.lexically_relative(uploads_abs);
     if (rel_to_root.empty() || *rel_to_root.begin() == "..")
     {
@@ -123,28 +133,64 @@ ReferencePathResolver::Status ReferencePathResolver::Resolve(
         return Status::OutsideRoot;
     }
 
-    std::error_code ec;
-    if (!fs::is_regular_file(target_abs, ec))
+    // ---- Open the target as a USD layer ------------------------------------
+    // FindOrOpen both proves the target is an accessible, parseable USD layer
+    // (replacing the old existence + filename-extension checks) and hands us the
+    // layer needed to validate the reference target. The path is already
+    // resolved and escape-guarded, so opening it is safe.
+    const pxr::SdfLayerRefPtr layer = pxr::SdfLayer::FindOrOpen(target_abs.generic_string());
+    if (!layer)
     {
-        IDTX_LOG(IDTX_WARN, "reference_path '{}' does not resolve to an existing file ('{}').",
+        IDTX_LOG(IDTX_WARN, "reference_path '{}' is not an accessible USD layer ('{}').",
                  asset_str, target_abs.string());
-        return Status::NotFound;
+        return Status::LayerUnreadable;
     }
-    if (!utils::UsdFileLocator::IsUsdFilename(target_abs.filename().string()))
-        return Status::NotAUsdFile;
 
-    const fs::path root_file_abs = Normalise(root_layer_file);
-    if (target_abs == root_file_abs)
+    // Self-reference guard via the layer's canonical identifier: FindOrOpen
+    // returns the already-open root layer when the target resolves to it, so an
+    // identifier match is an exact self-reference (no path-string normalisation).
+    if (layer->GetIdentifier() == root_layer->GetIdentifier())
     {
         IDTX_LOG(IDTX_WARN, "reference_path '{}' targets the session's own root layer; rejecting.",
                  asset_str);
         return Status::SelfReference;
     }
 
+    // ---- Verify the effective target prim exists ---------------------------
+    // An empty reference prim path means "use the layer's defaultPrim", so when
+    // no <prim> suffix was given we resolve and require that defaultPrim.
+    pxr::SdfPath target_prim = prim_path;
+    if (target_prim.IsEmpty())
+    {
+        target_prim = layer->GetDefaultPrimAsPath();
+        if (target_prim.IsEmpty())
+        {
+            IDTX_LOG(IDTX_WARN,
+                     "reference_path '{}' omits a <prim> and layer '{}' has no usable defaultPrim.",
+                     asset_str, target_abs.string());
+            return Status::NoDefaultPrim;
+        }
+    }
+
+    // NOTE: GetPrimAtPath is an Sdf-level (single-layer) lookup — it sees prim
+    // specs authored directly in this layer, not prims introduced by the
+    // layer's own sublayers or composition arcs. This is the intended
+    // lightweight check; a false negative is possible only for a target whose
+    // prim exists solely through the referenced layer's own composition.
+    if (!layer->GetPrimAtPath(target_prim))
+    {
+        IDTX_LOG(IDTX_WARN, "reference_path '{}' target prim '{}' does not exist in layer '{}'.",
+                 asset_str, target_prim.GetString(), target_abs.string());
+        return Status::PrimNotFound;
+    }
+
     // ---- Produce the authored (sidecar) and broadcast (root) forms ---------
+    // out.prim_path keeps the AUTHORED prim path (empty == defaultPrim); it must
+    // not be overwritten with the resolved defaultPrim, so the authored
+    // SdfReference/SdfPayload keeps meaning "use the layer's defaultPrim".
     out.authored_asset = ToAnchoredRelative(target_abs, sidecar_dir);
     out.prim_path      = prim_path;
-    out.broadcast_path = JoinAssetAndPrim(ToAnchoredRelative(target_abs, root_layer_dir), prim_path);
+    out.broadcast_path = JoinAssetAndPrim(ToAnchoredRelative(target_abs, root_dir), prim_path);
     return Status::Ok;
 }
 
@@ -167,9 +213,10 @@ const char* ReferencePathResolver::StatusToString(Status s) noexcept
         case Status::SearchPathRejected: return "SearchPathRejected";
         case Status::InvalidPrimPath:    return "InvalidPrimPath";
         case Status::OutsideRoot:        return "OutsideRoot";
-        case Status::NotFound:           return "NotFound";
-        case Status::NotAUsdFile:        return "NotAUsdFile";
+        case Status::LayerUnreadable:    return "LayerUnreadable";
         case Status::SelfReference:      return "SelfReference";
+        case Status::NoDefaultPrim:      return "NoDefaultPrim";
+        case Status::PrimNotFound:       return "PrimNotFound";
     }
     return "Unknown";
 }

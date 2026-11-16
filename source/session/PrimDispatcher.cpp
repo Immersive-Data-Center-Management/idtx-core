@@ -383,14 +383,12 @@ PrimDispatcher::CreatePrimStatus PrimDispatcher::Create(const pxr::UsdStageRefPt
             IDTX_LOG(IDTX_ERROR, "CreatePrimRequest: stage has no root/edit layer; ignoring.");
             return CreatePrimStatus::InvalidStage;
         }
-        const std::filesystem::path root_file(root_layer->GetRealPath());
-        const std::filesystem::path root_dir    = root_file.parent_path();
         const std::filesystem::path sidecar_dir =
             std::filesystem::path(edit_layer->GetRealPath()).parent_path();
 
         const ReferencePathResolver::Status rs = ReferencePathResolver::Resolve(
             req.reference_path(), std::filesystem::path(uploads_root),
-            root_dir, sidecar_dir, root_file, resolved);
+            root_layer, sidecar_dir, resolved);
         if (rs != ReferencePathResolver::Status::Ok)
         {
             IDTX_LOG(IDTX_WARN, "CreatePrimRequest reference_path '{}' rejected: {}.",

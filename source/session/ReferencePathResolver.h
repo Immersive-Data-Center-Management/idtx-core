@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <string>
 
+#include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
 
 #include <idtx/utils/Logger.h>
@@ -53,9 +54,11 @@ public:
         SearchPathRejected,   ///< A bare `folder/file.usd` search-path (unsupported).
         InvalidPrimPath,      ///< The `<...>` suffix was not a valid absolute prim path.
         OutsideRoot,          ///< The resolved target escapes the uploads root.
-        NotFound,             ///< The target does not exist (or is not a regular file).
-        NotAUsdFile,          ///< The target is not a USD file.
+        LayerUnreadable,      ///< The target could not be opened as a USD layer
+                              ///< (missing, not a USD file, or unparseable).
         SelfReference,        ///< The target is the session's own root layer file.
+        NoDefaultPrim,        ///< No `<prim>` suffix and the layer has no usable defaultPrim.
+        PrimNotFound,         ///< The target prim does not exist in the referenced layer.
     };
 
     /** @brief The re-anchored forms of a validated reference. */
@@ -69,19 +72,25 @@ public:
     /**
      * @brief Resolve and validate @p reference_path.
      *
+     * Beyond the server's path policy (uploads-root anchoring, the search-path
+     * rejection and the uploads-root escape guard), the target is opened with
+     * @c SdfLayer::FindOrOpen — proving it is an accessible, parseable USD layer
+     * — and the effective target prim (the `<prim>` suffix, or the layer's
+     * defaultPrim when none is given) is checked to actually exist in that layer.
+     *
      * @param reference_path Raw client string (asset path + optional `<prim>`).
      * @param uploads_root   Canonical-able uploads root ("root download folder").
-     * @param root_layer_dir Directory of the stage's root layer (the shared file).
+     * @param root_layer     The open stage's root layer. Supplies the anchor
+     *                       directory for `./`/`../` asset paths and the identity
+     *                       used by the self-reference guard. Must be non-null.
      * @param sidecar_dir    Directory of the stage's edit-target (sidecar) layer.
-     * @param root_layer_file The stage's root layer file (for the self-ref guard).
      * @param out            Filled on Status::Ok.
      * @return The granular outcome; never throws.
      */
     static Status Resolve(const std::string& reference_path,
                           const std::filesystem::path& uploads_root,
-                          const std::filesystem::path& root_layer_dir,
+                          const pxr::SdfLayerHandle& root_layer,
                           const std::filesystem::path& sidecar_dir,
-                          const std::filesystem::path& root_layer_file,
                           Resolved& out);
 
     /**
