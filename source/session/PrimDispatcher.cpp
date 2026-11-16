@@ -334,15 +334,30 @@ void PrimDispatcher::ReadAttributes(const pxr::UsdPrim& prim,
     }
 }
 
-bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
-                            const idtxcore::CreatePrimRequest& req,
-                            const std::string& uploads_root,
-                            CreatedPrim& out)
+const char* PrimDispatcher::CreatePrimStatusToString(CreatePrimStatus status) noexcept
+{
+    switch (status)
+    {
+        case CreatePrimStatus::Ok:                  return "Ok";
+        case CreatePrimStatus::InvalidStage:        return "InvalidStage";
+        case CreatePrimStatus::InvalidType:         return "InvalidType";
+        case CreatePrimStatus::InvalidParent:       return "InvalidParent";
+        case CreatePrimStatus::InvalidReference:    return "InvalidReference";
+        case CreatePrimStatus::Failed:              return "Failed";
+    }
+    
+    return "Unknown";
+}
+
+PrimDispatcher::CreatePrimStatus PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
+                                                        const idtxcore::CreatePrimRequest& req,
+                                                        const std::string& uploads_root,
+                                                        CreatedPrim& out)
 {
     if (!stage)
     {
         IDTX_LOG(IDTX_ERROR, "PrimDispatcher::Create called with null stage.");
-        return false;
+        return CreatePrimStatus::InvalidStage;
     }
 
     const std::string& parent_path = req.parent_path();
@@ -358,7 +373,7 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
         if (req.reference_path().empty())
         {
             IDTX_LOG(IDTX_WARN, "CreatePrimRequest of reference type without reference_path; ignoring.");
-            return false;
+            return CreatePrimStatus::InvalidReference;
         }
 
         const pxr::SdfLayerHandle root_layer = stage->GetRootLayer();
@@ -366,7 +381,7 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
         if (!root_layer || !edit_layer)
         {
             IDTX_LOG(IDTX_ERROR, "CreatePrimRequest: stage has no root/edit layer; ignoring.");
-            return false;
+            return CreatePrimStatus::InvalidStage;
         }
         const std::filesystem::path root_file(root_layer->GetRealPath());
         const std::filesystem::path root_dir    = root_file.parent_path();
@@ -380,7 +395,7 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
         {
             IDTX_LOG(IDTX_WARN, "CreatePrimRequest reference_path '{}' rejected: {}.",
                      req.reference_path(), ReferencePathResolver::StatusToString(rs));
-            return false;
+            return CreatePrimStatus::InvalidReference;
         }
 
         const std::string stem = std::filesystem::path(resolved.authored_asset).stem().string();
@@ -394,21 +409,21 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
         {
             IDTX_LOG(IDTX_WARN, "CreatePrimRequest with unknown prim type {}; ignoring.",
                      static_cast<int>(type));
-            return false;
+            return CreatePrimStatus::InvalidType;
         }
     }
 
     if (parent_path.empty() || !pxr::SdfPath::IsValidPathString(parent_path))
     {
         IDTX_LOG(IDTX_WARN, "CreatePrimRequest with invalid parent_path '{}'.", parent_path);
-        return false;
+        return CreatePrimStatus::InvalidParent;
     }
 
     const pxr::SdfPath parent(parent_path);
     if (!parent.IsAbsolutePath() || !(parent.IsPrimPath() || parent == pxr::SdfPath::AbsoluteRootPath()))
     {
         IDTX_LOG(IDTX_WARN, "CreatePrimRequest parent_path '{}' is not a prim path.", parent_path);
-        return false;
+        return CreatePrimStatus::InvalidParent;
     }
 
     const pxr::UsdPrim parent_prim = stage->GetPrimAtPath(parent);
@@ -416,7 +431,7 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
     {
         IDTX_LOG(IDTX_WARN, "CreatePrimRequest parent '{}' not found on stage; ignoring.",
                  parent_path);
-        return false;
+        return CreatePrimStatus::InvalidParent;
     }
 
     // GetPrimAtPath returns inactive prims too, so an explicit check is needed:
@@ -428,7 +443,7 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
         IDTX_LOG(IDTX_WARN,
                  "CreatePrimRequest parent '{}' is inactive (deleted); ignoring.",
                  parent_path);
-        return false;
+        return CreatePrimStatus::InvalidParent;
     }
 
     // Gprims may not be nested under another Gprim. As references are liekly to contain GPrims
@@ -440,7 +455,7 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
                  "CreatePrimRequest parent '{}' is or descends from a gprim; "
                  "USD forbids nesting gprims. Ignoring.",
                  parent_path);
-        return false;
+        return CreatePrimStatus::InvalidParent;
     }
 
     try
@@ -458,7 +473,7 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
             if (!prim)
             {
                 IDTX_LOG(IDTX_ERROR, "Failed to author reference prim at '{}'.", out.prim_path);
-                return false;
+                return CreatePrimStatus::Failed;
             }
 
             const bool payload =
@@ -478,7 +493,7 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
                 
                 // clean-up the created typeless def that would hold the reference/payload arc on failure.
                 stage->RemovePrim(prim.GetPrimPath());
-                return false;
+                return CreatePrimStatus::Failed;
             }
 
             out.has_ref        = true;
@@ -490,7 +505,7 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
             if (!AuthorPrim(stage, child, type))
             {
                 IDTX_LOG(IDTX_ERROR, "Failed to author {} at '{}'.", base_name.GetString(), out.prim_path);
-                return false;
+                return CreatePrimStatus::Failed;
             }
             // Read the (fallback) default attributes authored for the type.
             ReadAttributes(stage->GetPrimAtPath(child), type, out);
@@ -511,13 +526,13 @@ bool PrimDispatcher::Create(const pxr::UsdStageRefPtr& stage,
             }
         }
 
-        return true;
+        return CreatePrimStatus::Ok;
     }
     catch (const std::exception& e)
     {
         IDTX_LOG(IDTX_ERROR, "Exception while creating prim under '{}': {}",
                  parent_path, e.what());
-        return false;
+        return CreatePrimStatus::Failed;
     }
 }
 

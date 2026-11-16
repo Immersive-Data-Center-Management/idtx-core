@@ -64,6 +64,20 @@ class PrimDispatcher
 
 public:
     /**
+     * @brief Outcome of a Create() request.
+     */
+    enum class CreatePrimStatus
+    {
+        Ok,
+        InvalidStage,       ///< The stage is invalid/null
+        InvalidType,        ///< The prim tye to be authored is unknown
+        InvalidParent,      ///< The parent of the prim to be authored is invalid (e.g. nested GPrims)
+        InvalidReference,   ///< The reference is invalid or unresolvable
+        Failed,             ///< openUSD failed to author the prim
+    };
+    
+    static const char* CreatePrimStatusToString(CreatePrimStatus status) noexcept;
+    /**
      * @brief Create a primitive described by @p req under its parent path.
      *
      * Must be called from the session's command consumer, which has exclusive
@@ -91,9 +105,9 @@ public:
      * @param out On success, receives the resolved name/path, the authored
      *            default attribute values, and (for a reference prim) the arc
      *            kind and broadcast reference path.
-     * @return true if the prim was created, false otherwise. Never throws.
+     * @return The status of the creation. Never throws.
      */
-    static bool Create(const pxr::UsdStageRefPtr& stage,
+    static CreatePrimStatus Create(const pxr::UsdStageRefPtr& stage,
                        const idtxcore::CreatePrimRequest& req,
                        const std::string& uploads_root,
                        CreatedPrim& out);

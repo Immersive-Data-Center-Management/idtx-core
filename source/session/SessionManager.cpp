@@ -1278,7 +1278,7 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
     // path; create_in_progress makes the TfNotice listener skip the resync this
     // authoring fires, because the creation is broadcast explicitly below.
     CreatedPrim created;
-    bool ok = false;
+    PrimDispatcher::CreatePrimStatus status = PrimDispatcher::CreatePrimStatus::Failed;
     try
     {
        
@@ -1287,18 +1287,18 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
         context.origin   = command.origin;
         context.creating = true;
         const AuthoringScope authoring(context);
-        ok = PrimDispatcher::Create(session.stage, req, m_locator_.GetRoot(), created);
+        status = PrimDispatcher::Create(session.stage, req, m_locator_.GetRoot(), created);
     }
     catch (const std::exception& e)
     {
         IDTX_LOG(IDTX_ERROR, "CreatePrim threw in session {}: {}", session.id, e.what());
     }
 
-    if (!ok)
+    if (status != PrimDispatcher::CreatePrimStatus::Ok)
     {
         // Bad type, a missing/forbidden parent (including gprim nesting), or an
         // invalid/unresolvable reference path.
-        SendAck(session, command.origin, command.request_id, false, "invalid_parent");
+        SendAck(session, command.origin, command.request_id, false, PrimDispatcher::CreatePrimStatusToString(status));
         return;
     }
 
