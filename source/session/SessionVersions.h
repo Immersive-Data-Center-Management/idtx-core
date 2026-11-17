@@ -40,6 +40,16 @@ enum class UpdateBaseStatus : std::uint8_t
  *
  * Entries are never removed; they are small and freed with the session.
  *
+ * Conflict domain: RecordChange() records a TRANSFORM/LIFECYCLE conflict —
+ * transform writes, prim creation and (de)activation, and reloads that can
+ * affect a prim's transform or existence. CheckUpdate() rejects a client's
+ * TransformUpdate against exactly this domain. Ordinary attribute-only writes
+ * (SetPrimAttributes) deliberately do NOT call RecordChange: they advance the
+ * global server_seq and are tracked by RecordSent for base validity, but they
+ * must not stale an in-flight transform on the same prim without also sending
+ * authoritative transform state (plan D10 / §3.3). RecordSent/RecordCorrection
+ * remain global to the connection.
+ *
  * Used by the session's consumer. The methods take an internal mutex because
  * a change notice from a root layer shared with another session can be
  * delivered on that session's consumer thread; otherwise it is uncontended.

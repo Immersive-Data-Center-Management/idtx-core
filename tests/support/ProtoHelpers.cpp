@@ -137,7 +137,73 @@ std::string BuildSetPrimActiveRequest(const std::string& session_id,
 bool ParseBaseMessage(const std::string& bytes, idtxcore::BaseMessage& out)
 {
     return out.ParseFromString(bytes);
-}std::optional<idtxcore::BaseMessage> WaitForMessage(
+}
+
+idtxcore::PrimAttribute MakeDoubleAttr(const std::string& name, const std::string& type_name,
+                                       const std::vector<double>& comps, bool is_array)
+{
+    idtxcore::PrimAttribute a;
+    a.set_name(name);
+    a.set_type_name(type_name);
+    auto* v = a.mutable_value();
+    v->set_is_array(is_array);
+    for (double d : comps) v->add_doubles(d);
+    return a;
+}
+
+idtxcore::PrimAttribute MakeIntAttr(const std::string& name, const std::string& type_name,
+                                    const std::vector<std::int64_t>& comps, bool is_array)
+{
+    idtxcore::PrimAttribute a;
+    a.set_name(name);
+    a.set_type_name(type_name);
+    auto* v = a.mutable_value();
+    v->set_is_array(is_array);
+    for (std::int64_t i : comps) v->add_ints(i);
+    return a;
+}
+
+idtxcore::PrimAttribute MakeStringAttr(const std::string& name, const std::string& type_name,
+                                       const std::vector<std::string>& vals, bool is_array)
+{
+    idtxcore::PrimAttribute a;
+    a.set_name(name);
+    a.set_type_name(type_name);
+    auto* v = a.mutable_value();
+    v->set_is_array(is_array);
+    for (const auto& s : vals) v->add_strings(s);
+    return a;
+}
+
+idtxcore::PrimAttribute MakeBoolAttr(const std::string& name, const std::string& type_name,
+                                     const std::vector<bool>& vals, bool is_array)
+{
+    idtxcore::PrimAttribute a;
+    a.set_name(name);
+    a.set_type_name(type_name);
+    auto* v = a.mutable_value();
+    v->set_is_array(is_array);
+    for (bool b : vals) v->add_bools(b);
+    return a;
+}
+
+std::string BuildSetPrimAttributesRequest(const std::string& session_id,
+                                          const std::string& prim_path,
+                                          const std::vector<idtxcore::PrimAttribute>& attrs,
+                                          const std::uint64_t request_id)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session_id);
+    msg.set_request_id(request_id);
+    auto* req = msg.mutable_set_prim_attributes();
+    req->set_session_id(session_id);
+    req->set_prim_path(prim_path);
+    for (const auto& a : attrs) *req->add_attributes() = a;
+    std::string out;
+    msg.SerializeToString(&out);
+    return out;
+}
+std::optional<idtxcore::BaseMessage> WaitForMessage(
     WsTestClient& ws,
     std::chrono::milliseconds timeout,
     const std::function<bool(const idtxcore::BaseMessage&)>& pred)
