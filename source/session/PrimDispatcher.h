@@ -91,8 +91,8 @@ public:
      *   - an optional local transform, authored verbatim as the prim's local
      *     transform relative to its parent.
      *
-     * Validation (all checked before anything is authored, so a failure leaves
-     * the stage untouched):
+     * Validation (all checked before anything is authored, if additional failures
+     * occur during authoring, any stale artifacts will be undone.):
      *   - @c parent_path is a valid, existing, active prim path ("/" accepted);
      *   - for a gprim, neither the parent nor any ancestor is a gprim;
      *   - for a reference prim, @c reference_path resolves to an existing USD
