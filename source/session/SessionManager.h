@@ -234,7 +234,8 @@ public:
         Accepted,
         UnknownSession,
         QueueFull,      // the session's queue is full; retry later
-        SessionClosing  // the session is being destroyed
+        SessionClosing, // the session is being destroyed
+        RequestTooLarge // the request exceeds a configured admission budget
     };
 
     /**
@@ -330,6 +331,24 @@ public:
                                             bool active,
                                             ConnectionId origin,
                                             std::uint64_t request_id) const;
+
+    /**
+     * @brief Queue a batch of arbitrary attribute defaults for one prim.
+     *
+     * Never blocks. The request's admission budget (attribute count, byte,
+     * component and string-byte limits) is checked BEFORE the request is
+     * copied/queued; an over-budget request returns RequestTooLarge and nothing
+     * is queued. When accepted, the consumer validates each attribute, authors
+     * the valid subset, broadcasts it to every client (including @p origin)
+     * under one server_seq and sends @p origin a SetPrimAttributesAck listing
+     * only the failures. When not accepted, no Ack is sent; the caller reports
+     * the failure (the one response type is the Ack with every attribute
+     * failed). There is no base_seq/staleness check (plan D1/D2).
+     */
+    SubmitStatus SubmitSetPrimAttributesCommand(const std::string& session_id,
+                                                const idtxcore::SetPrimAttributesRequest& request,
+                                                ConnectionId origin,
+                                                std::uint64_t request_id) const;
 
     // ------------------------------------------------------------------
     // Broadcast (invoked from StageNoticeListener, on the session's consumer
@@ -436,6 +455,7 @@ private:
     void HandleCommand(Session& session, SnapshotCommand& command);
     void HandleCommand(Session& session, CreatePrimCommand& command);
     void HandleCommand(Session& session, SetPrimActiveCommand& command);
+    void HandleCommand(Session& session, SetPrimAttributesCommand& command);
     void HandleCommand(Session& session, CommitCommand& command);
     void HandleCommand(Session& session, FlushCommand& command);
     void HandleCommand(Session& session, CorrectionCommand& command);
@@ -488,6 +508,15 @@ private:
                         std::uint64_t request_id,
                         bool ok,
                         const char* error);
+
+    /// Send a SetPrimAttributesAck (failures only) stamped with @p seq to
+    /// @p connection_id, recording it as sent on success.
+    static void SendSetPrimAttributesAck(Session& session,
+                                         ConnectionId connection_id,
+                                         std::uint64_t request_id,
+                                         const std::string& prim_path,
+                                         std::uint64_t seq,
+                                         const std::vector<idtxcore::AttributeError>& failed);
 
     /// Send the current state of @p prim_path to @p connection_id only, as a
     /// TransformBroadcast with a new server_seq. The stage is not changed.

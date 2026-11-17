@@ -31,11 +31,14 @@
 #include <idtx/proto/base.pb.h>
 #include <idtx/proto/transform.pb.h>
 #include <idtx/proto/prim.pb.h>
+#include <idtx/proto/attribute.pb.h>
 
 #include "concurrency/SharedLayerLock.h"
 #include "concurrency/WorkerExecutor.h"
+#include "AttributeDispatcher.h"
 #include "AuthoringContext.h"
 #include "PrimDispatcher.h"
+#include "ProtoVtCodec.h"
 #include "ReferencePathResolver.h"
 #include "StageCommitter.h"
 #include "StageNoticeListener.h"
@@ -267,6 +270,138 @@ SessionManager::SubmitStatus ToSubmitStatus(const CommandAdmissionStatus status)
         default:                                return SessionManager::SubmitStatus::SessionClosing;
     }
 }
+
+// ---------------------------------------------------------------------------
+// Attribute-batch helpers (plan §§2.5, 3.2, 3.3)
+// ---------------------------------------------------------------------------
+
+// Admission budgets. These are v1 defaults; exact production limits are a
+// deployment decision (plan §6.4). The command scheduler is bounded by command
+// COUNT, not payload bytes, so these guard against a single oversized request.
+constexpr int         kMaxAttributesPerRequest = 1024;
+constexpr std::size_t kMaxRequestBytes         = 8u * 1024 * 1024;  // 8 MiB
+constexpr std::size_t kMaxTotalComponents      = 1u << 22;          // ~4M lane entries
+constexpr std::size_t kMaxTotalStringBytes     = 4u * 1024 * 1024;  // 4 MiB
+
+bool AttributeRequestExceedsBudget(const idtxcore::SetPrimAttributesRequest& req)
+{
+    if (req.attributes_size() > kMaxAttributesPerRequest) return true;
+    if (req.ByteSizeLong() > kMaxRequestBytes) return true;
+    std::size_t comps = 0;
+    std::size_t strbytes = 0;
+    for (const auto& a : req.attributes())
+    {
+        if (!a.has_value()) continue;
+        const auto& v = a.value();
+        comps += static_cast<std::size_t>(v.doubles_size()) + v.ints_size()
+               + v.uints_size() + v.bools_size() + v.strings_size();
+        for (const auto& s : v.strings()) strbytes += s.size();
+    }
+    return comps > kMaxTotalComponents || strbytes > kMaxTotalStringBytes;
+}
+
+// Scene-root asset context for authoring and snapshot read-back.
+AttributeAssetContext BuildAssetContext(const Session& session, const std::string& uploads_root)
+{
+    AttributeAssetContext ctx;
+    ctx.uploads_root = std::filesystem::path(uploads_root);
+    if (session.stage)
+    {
+        if (const pxr::SdfLayerHandle root = session.stage->GetRootLayer())
+            ctx.root_layer_dir = std::filesystem::path(root->GetRealPath()).parent_path();
+    }
+    return ctx;
+}
+
+// Build a serialized BaseMessage(set_prim_attributes_broadcast) from the
+// pre-encoded wire values of the successfully authored attributes, preserving
+// role and array-ness (no type inference after authoring).
+std::string SerializeSetPrimAttributesBroadcast(
+    const Session& session, const std::string& prim_path,
+    const std::vector<AttributeDispatcher::AttributeResult>& authored,
+    std::uint64_t server_seq)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session.id);
+    msg.set_server_seq(server_seq);
+    auto* bcast = msg.mutable_set_prim_attributes_broadcast();
+    bcast->set_prim_path(prim_path);
+    for (const auto& r : authored)
+    {
+        if (!r.ok) continue;
+        *bcast->add_attributes() = r.wire;
+    }
+    std::string payload;
+    msg.SerializeToString(&payload);
+    return payload;
+}
+
+// Snapshot overload: the authored attributes are already PrimAttribute values.
+std::string SerializeSetPrimAttributesBroadcast(
+    const Session& session, const std::string& prim_path,
+    const std::vector<idtxcore::PrimAttribute>& attrs, std::uint64_t server_seq)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session.id);
+    msg.set_server_seq(server_seq);
+    auto* bcast = msg.mutable_set_prim_attributes_broadcast();
+    bcast->set_prim_path(prim_path);
+    for (const auto& a : attrs) *bcast->add_attributes() = a;
+    std::string payload;
+    msg.SerializeToString(&payload);
+    return payload;
+}
+
+std::string SerializeSetPrimAttributesAck(
+    const Session& session, std::uint64_t request_id, std::uint64_t server_seq,
+    const std::string& prim_path, const std::vector<idtxcore::AttributeError>& failed)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(session.id);
+    msg.set_request_id(request_id);
+    msg.set_server_seq(server_seq);
+    auto* ack = msg.mutable_set_prim_attributes_ack();
+    ack->set_prim_path(prim_path);
+    for (const auto& e : failed) *ack->add_failed() = e;
+    std::string payload;
+    msg.SerializeToString(&payload);
+    return payload;
+}
+
+// Collect the failed entries of an authoring result into wire AttributeErrors.
+std::vector<idtxcore::AttributeError> FailuresOf(
+    const AttributeDispatcher::AuthoringResult& result)
+{
+    std::vector<idtxcore::AttributeError> failed;
+    for (const auto& r : result.attributes)
+    {
+        if (r.ok) continue;
+        idtxcore::AttributeError e;
+        e.set_name(r.name);
+        e.set_reason(AttributeDispatcher::ToProto(r.reason));
+        if (!r.detail.empty()) e.set_detail(r.detail);
+        failed.push_back(std::move(e));
+    }
+    return failed;
+}
+
+// Mark every attribute of a request failed with one reason (prim-level or
+// transport rejection), using the request's attribute names.
+std::vector<idtxcore::AttributeError> AllFailed(
+    const idtxcore::SetPrimAttributesRequest& req, idtxcore::AttributeFailureReason reason)
+{
+    std::vector<idtxcore::AttributeError> failed;
+    failed.reserve(req.attributes_size());
+    for (const auto& a : req.attributes())
+    {
+        idtxcore::AttributeError e;
+        e.set_name(a.name());
+        e.set_reason(reason);
+        failed.push_back(std::move(e));
+    }
+    return failed;
+}
+
 
 /// True if the prim at @p path, which the session's own layer has specs for,
 /// is no longer part of @p stage because the file defining it no longer does,
@@ -1162,6 +1297,40 @@ SessionManager::SubmitStatus SessionManager::SubmitSetPrimActiveCommand(
     return status;
 }
 
+SessionManager::SubmitStatus SessionManager::SubmitSetPrimAttributesCommand(
+    const std::string& session_id,
+    const idtxcore::SetPrimAttributesRequest& request,
+    ConnectionId origin,
+    std::uint64_t request_id) const
+{
+    auto session = Get(session_id);
+    if (!session)
+    {
+        IDTX_LOG(IDTX_WARN, "SubmitSetPrimAttributesCommand: unknown session {}.", session_id);
+        return SubmitStatus::UnknownSession;
+    }
+
+    // Budget check BEFORE copying/queuing (plan §3.2): the scheduler is bounded
+    // by command count, not payload bytes.
+    if (AttributeRequestExceedsBudget(request))
+    {
+        IDTX_LOG(IDTX_WARN,
+                 "Session {}: attribute request exceeds admission budget; rejecting.", session_id);
+        return SubmitStatus::RequestTooLarge;
+    }
+
+    SetPrimAttributesCommand command(
+        std::make_unique<const idtxcore::SetPrimAttributesRequest>(request), origin, request_id);
+
+    const auto status = Submit(*session, std::move(command));
+    if (status == SubmitStatus::QueueFull)
+    {
+        IDTX_LOG(IDTX_WARN, "Session {} command queue is full; rejecting attribute batch.",
+                 session_id);
+    }
+    return status;
+}
+
 // ---------------------------------------------------------------------------
 // Command processing (runs on the session's consumer)
 // ---------------------------------------------------------------------------
@@ -1408,6 +1577,86 @@ void SessionManager::HandleCommand(Session& session, SetPrimActiveCommand& comma
              session.id, command.active, command.prim_path);
 }
 
+void SessionManager::HandleCommand(Session& session, SetPrimAttributesCommand& command)
+{
+    const std::string prim_path =
+        command.request ? command.request->prim_path() : std::string();
+
+    if (!session.stage || !command.request)
+    {
+        // Pre-authoring failure: attempt an all-failed NOT_AUTHORABLE ack.
+        SendSetPrimAttributesAck(
+            session, command.origin, command.request_id, prim_path, session.server_seq.load(),
+            command.request ? AllFailed(*command.request, idtxcore::ATTRIBUTE_FAILURE_NOT_AUTHORABLE)
+                            : std::vector<idtxcore::AttributeError>{});
+        return;
+    }
+
+    const idtxcore::SetPrimAttributesRequest& req = *command.request;
+
+    AttributeDispatcher::AuthoringResult result;
+    try
+    {
+        // setting_attributes makes the StageNoticeListener skip the resync the
+        // attribute authoring fires; the authored subset is broadcast below.
+        AuthoringContext ctx;
+        ctx.session            = &session;
+        ctx.origin             = command.origin;
+        ctx.setting_attributes = true;
+        const AuthoringScope scope(ctx);
+        result = AttributeDispatcher::Author(
+            session.stage, req, BuildAssetContext(session, m_locator_.GetRoot()));
+    }
+    catch (const std::exception& e)
+    {
+        IDTX_LOG(IDTX_ERROR, "SetPrimAttributes threw in session {}: {}", session.id, e.what());
+        SendSetPrimAttributesAck(session, command.origin, command.request_id, prim_path,
+                                 session.server_seq.load(),
+                                 AllFailed(req, idtxcore::ATTRIBUTE_FAILURE_NOT_AUTHORABLE));
+        return;
+    }
+
+    if (!result.authored_any)
+    {
+        // Nothing changed (prim-level failure, every per-attribute failed, or an
+        // empty no-op): no seq bump, no broadcast. Ack at the unchanged seq,
+        // mirroring SetActiveStatus::AlreadyInState.
+        SendSetPrimAttributesAck(session, command.origin, command.request_id, prim_path,
+                                 session.server_seq.load(), FailuresOf(result));
+        return;
+    }
+
+    session.dirty.store(true, std::memory_order_relaxed);
+
+    // One server_seq for the batch. Deliberately NO SessionVersions::RecordChange:
+    // this changes attribute defaults, not the transform-conflict domain, so it
+    // must not stale an in-flight transform (plan D10/§3.3).
+    const std::uint64_t seq = session.server_seq.fetch_add(1) + 1;
+
+    // D1: echo the AUTHORED subset to ALL clients (incl. origin), seq-stamped.
+    const std::string payload =
+        SerializeSetPrimAttributesBroadcast(session, req.prim_path(), result.attributes, seq);
+    if (payload.empty())
+    {
+        // Post-commit serialization failure: the layer already changed, but the
+        // required echo cannot be sent. Per §3.6 a success Ack must not precede
+        // its echo, so send nothing; the initiator times out and resnapshots,
+        // rebuilding from authoritative state (which now includes these writes).
+        IDTX_LOG(IDTX_ERROR,
+                 "Session {}: failed to serialize attribute broadcast for '{}' after authoring; "
+                 "clients must resnapshot.", session.id, req.prim_path());
+        return;
+    }
+    BroadcastToAll(session, payload, seq);
+
+    // Ack the initiator with ONLY the failures (empty => full success).
+    SendSetPrimAttributesAck(session, command.origin, command.request_id, req.prim_path(),
+                             seq, FailuresOf(result));
+
+    IDTX_LOG(IDTX_INFO, "Session {}: authored attributes on '{}' (seq {}).",
+             session.id, req.prim_path(), seq);
+}
+
 void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
 {
     if (!session.stage) return;
@@ -1415,6 +1664,7 @@ void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
     const std::uint64_t seq = session.server_seq.load();
 
     std::vector<std::string> frames;
+    bool attr_snapshot_failed = false;
     const pxr::SdfLayerHandle session_layer = session.stage->GetSessionLayer();
     if (session_layer)
     {
@@ -1559,6 +1809,44 @@ void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
             if (msg.SerializeToString(&payload)) frames.push_back(std::move(payload));
         }
 
+        // Attribute frames: for every session-layer prim, replay its authored
+        // arbitrary attribute defaults (plan §4.1). Read straight from the Sdf
+        // specs via the same codec as live authoring. Transform ops are owned by
+        // the transform pass above and skipped here; a spec with no authored
+        // default (metadata/connection-only) is skipped. A present default that
+        // cannot be encoded aborts the whole snapshot: omitting it then sending
+        // SnapshotComplete would wrongly claim a complete snapshot (§3.6/§4.1).
+        const AttributeAssetContext assets = BuildAssetContext(session, m_locator_.GetRoot());
+        for (const auto& p : prim_paths)
+        {
+            if (attr_snapshot_failed) break;
+            const pxr::SdfPrimSpecHandle spec = session_layer->GetPrimAtPath(p);
+            if (!spec) continue;
+
+            std::vector<idtxcore::PrimAttribute> attrs;
+            for (const pxr::SdfAttributeSpecHandle& attr : spec->GetAttributes())
+            {
+                if (!attr) continue;
+                const std::string name = attr->GetName();
+                if (name == "xformOpOrder" || name.rfind("xformOp:", 0) == 0) continue;
+                if (!attr->HasDefaultValue()) continue; // metadata/connection-only spec
+
+                idtxcore::PrimAttribute pa;
+                if (!AttributeDispatcher::ReadAuthoredAttribute(attr, assets, pa))
+                {
+                    IDTX_LOG(IDTX_ERROR,
+                             "Session {}: cannot encode authored default '{}' on '{}' for snapshot; "
+                             "aborting snapshot.", session.id, name, p.GetString());
+                    attr_snapshot_failed = true;
+                    break;
+                }
+                attrs.push_back(std::move(pa));
+            }
+            if (!attrs.empty())
+                frames.push_back(
+                    SerializeSetPrimAttributesBroadcast(session, p.GetString(), attrs, seq));
+        }
+
         // Active frames last: every path now exists on the client (from REST +
         // the create frames above), so authoring active=false prunes each
         // subtree on the client exactly as it is pruned on the server.
@@ -1582,6 +1870,19 @@ void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
         std::shared_lock lk(session.clients_mutex);
         auto it = session.clients.find(command.connection);
         if (it == session.clients.end()) return; // left before the snapshot ran
+
+        // A snapshot that could not encode an authored default must not claim
+        // completeness: close the connection instead of sending a partial
+        // snapshot + SnapshotComplete. The client rebuilds on reconnect (§4.1).
+        if (attr_snapshot_failed)
+        {
+            it->second->close("snapshot_encode_failed");
+            IDTX_LOG(IDTX_WARN,
+                     "Closed a client of session {}: snapshot could not encode an authored default.",
+                     session.id);
+            return;
+        }
+
         for (const auto& f : frames) it->second->send_binary(f);
         session.versions.RecordSent(command.connection, seq);
     }
@@ -1712,6 +2013,21 @@ void SessionManager::SendAck(Session& session,
     const std::uint64_t seq = session.server_seq.load();
     if (SendToConnection(session, connection_id,
                          SerializeAck(session, request_id, seq, ok, error)))
+    {
+        session.versions.RecordSent(connection_id, seq);
+    }
+}
+
+void SessionManager::SendSetPrimAttributesAck(Session& session,
+                                              ConnectionId connection_id,
+                                              std::uint64_t request_id,
+                                              const std::string& prim_path,
+                                              std::uint64_t seq,
+                                              const std::vector<idtxcore::AttributeError>& failed)
+{
+    if (SendToConnection(
+            session, connection_id,
+            SerializeSetPrimAttributesAck(session, request_id, seq, prim_path, failed)))
     {
         session.versions.RecordSent(connection_id, seq);
     }
