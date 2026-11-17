@@ -1293,6 +1293,12 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
     {
         IDTX_LOG(IDTX_ERROR, "CreatePrim threw in session {}: {}", session.id, e.what());
     }
+    
+    // Regardless of the outcome of a reference/payload prim authoring, we refresh the shared layers as safety net.
+    // This ensures the usd layers are always up-to-date. Still under SharedLayers(), so no reload reads the list
+    // meanwhile.
+    if (req.type() == idtxcore::PRIM_TYPE_REF)
+        RefreshUsedLayers(session);
 
     if (status != PrimDispatcher::CreatePrimStatus::Ok)
     {
@@ -1315,12 +1321,6 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
     const std::string payload =
         SerializeCreatePrimBroadcast(session, req.parent_path(), req.type(), created, seq, &req);
     BroadcastToAll(session, payload, seq);
-
-    // If a reference/payload prim was created, the stage will now compose different layers. A
-    // reload has to find this session for each of them; still under
-    // SharedLayers(), so no reload reads the list meanwhile.
-    if (req.type() == idtxcore::PRIM_TYPE_REF)
-        RefreshUsedLayers(session);
 
     // Ack after the broadcast; SendAck stamps the current server_seq (== seq).
     SendAck(session, command.origin, command.request_id, true, nullptr);

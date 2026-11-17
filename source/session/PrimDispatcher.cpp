@@ -454,12 +454,12 @@ PrimDispatcher::CreatePrimStatus PrimDispatcher::Create(const pxr::UsdStageRefPt
                  parent_path);
         return CreatePrimStatus::InvalidParent;
     }
-
+    
     try
     {
         const pxr::SdfPath child = UniqueChildPath(stage, parent, base_name.GetString(), out.name);
         out.prim_path = child.GetString();
-
+        
         // No SdfChangeBlock around the define/arc authoring: defining a prim and
         // adding a composition arc are Usd-level operations USD advises against
         // performing inside a change block. The resync notices they fire are
@@ -529,6 +529,12 @@ PrimDispatcher::CreatePrimStatus PrimDispatcher::Create(const pxr::UsdStageRefPt
     {
         IDTX_LOG(IDTX_ERROR, "Exception while creating prim under '{}': {}",
                  parent_path, e.what());
+        
+        // ensure that we do not leave any artifacts behind and remove the prim that was tried to be created
+        // and exists as stale artifact
+        if (!out.prim_path.empty()) // set once UniqueChildPath succeeded
+            stage->RemovePrim(pxr::SdfPath(out.prim_path));
+        
         return CreatePrimStatus::Failed;
     }
 }
