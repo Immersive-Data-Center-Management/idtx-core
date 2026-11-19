@@ -1234,9 +1234,10 @@ TEST_CASE("delete: a prim introduced across a reference cannot be deleted")
     TestServer server;
     server.WaitReady();
 
-    // referenced.usda defines /Payload; ref_main.usda references it at /Root/Ref,
-    // so /Root/Ref draws opinions from a foreign layer and is not locally
-    // deletable even though its def is authored in the root layer.
+    // referenced.usda defines /Payload/Inner; ref_main.usda references it at
+    // /Root/Ref. The ref prim itself (/Root/Ref) is authored in the root layer
+    // and IS deletable; /Root/Ref/Inner is introduced purely across the
+    // reference arc and is NOT locally deletable.
     {
         std::ofstream ref(server.uploads_root() / "referenced.usda");
         ref << "#usda 1.0\n(\n    defaultPrim = \"Payload\"\n)\n\n"
@@ -1256,7 +1257,7 @@ TEST_CASE("delete: a prim introduced across a reference cannot be deleted")
     WsTestClient ws;
     Join(ws, server, sid);
 
-    ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, "/Root/Ref", false, 3));
+    ws.SendBinary(idtx::tests::BuildSetPrimActiveRequest(sid, "/Root/Ref/Inner", false, 3));
     std::vector<idtxcore::BaseMessage> frames;
     REQUIRE(WaitForAck(ws, 3, frames).has_value());
     CHECK(IsAckError(frames.back(), "not_deletable"));

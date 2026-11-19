@@ -307,8 +307,7 @@ public:
      * name, so there is no base_seq/staleness check.
      */
     SubmitStatus SubmitCreatePrimCommand(const std::string& session_id,
-                                         std::string parent_path,
-                                         idtxcore::PrimType type,
+                                         idtxcore::CreatePrimRequest request,
                                          ConnectionId origin,
                                          std::uint64_t request_id) const;
 
@@ -331,21 +330,6 @@ public:
                                             bool active,
                                             ConnectionId origin,
                                             std::uint64_t request_id) const;
-
-    /**
-     * @brief Queue adding (or, with @p remove, removing) a payload arc on
-     *        @p prim_path. Placeholder: the locking, deferral and layer
-     *        bookkeeping are in place, the authoring is not implemented yet
-     *        and the request is acked as "not_implemented".
-     *
-     * Never blocks. Not yet reachable from the websocket protocol.
-     */
-    SubmitStatus SubmitPayloadCommand(const std::string& session_id,
-                                      std::string prim_path,
-                                      std::string asset_path,
-                                      bool remove,
-                                      ConnectionId origin,
-                                      std::uint64_t request_id) const;
 
     // ------------------------------------------------------------------
     // Broadcast (invoked from StageNoticeListener, on the session's consumer
@@ -452,7 +436,6 @@ private:
     void HandleCommand(Session& session, SnapshotCommand& command);
     void HandleCommand(Session& session, CreatePrimCommand& command);
     void HandleCommand(Session& session, SetPrimActiveCommand& command);
-    void HandleCommand(Session& session, PayloadCommand& command);
     void HandleCommand(Session& session, CommitCommand& command);
     void HandleCommand(Session& session, FlushCommand& command);
     void HandleCommand(Session& session, CorrectionCommand& command);

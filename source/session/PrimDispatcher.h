@@ -30,8 +30,8 @@ namespace session
  *
  * Only the attribute members flagged present apply to the created type:
  * Cube -> size; Sphere -> radius; Cone/Cylinder/Capsule -> height, radius,
- * axis. The SessionManager copies the present members into the outgoing
- * CreatePrimBroadcast.
+ * axis; Plane -> width, length, axis. The SessionManager copies the present
+ * members into the outgoing CreatePrimBroadcast.
  */
 struct CreatedPrim
 {
@@ -46,6 +46,23 @@ struct CreatedPrim
     double      radius = 0.0;
     bool        has_axis = false;
     std::string axis;
+    bool        has_width = false;
+    double      width = 0.0;
+    bool        has_length = false;
+    double      length = 0.0;
+
+    // Set for a PRIM_TYPE_REF prim: the arc kind authored and the
+    // broadcast (root-layer-relative) reference path, `<prim>` suffix included.
+    bool                  has_ref = false;
+    idtxcore::PrimRefType ref_type = idtxcore::PRIM_REF_REFERENCE;
+    std::string           reference_path;
+
+    // True only when the request carried a local transform AND it was
+    // successfully authored onto the prim. A transform that could not be
+    // authored (the prim is not xformable, e.g. a reference to a non-xformable
+    // target) leaves this false, so SessionManager neither echoes nor
+    // broadcasts a transform the server never applied.
+    bool has_transform = false;
 };
 
 class PrimDispatcher
@@ -54,27 +71,52 @@ class PrimDispatcher
 
 public:
     /**
-     * @brief Create a built-in primitive of @p type under @p parent_path.
+     * @brief Outcome of a Create() request.
+     */
+    enum class CreatePrimStatus
+    {
+        Ok,
+        InvalidStage,       ///< The stage is invalid/null
+        InvalidType,        ///< The prim tye to be authored is unknown
+        InvalidParent,      ///< The parent of the prim to be authored is invalid (e.g. nested GPrims)
+        InvalidReference,   ///< The reference is invalid or unresolvable
+        Failed,             ///< openUSD failed to author the prim
+    };
+    
+    static const char* CreatePrimStatusToString(CreatePrimStatus status) noexcept;
+    /**
+     * @brief Create a primitive described by @p req under its parent path.
      *
      * Must be called from the session's command consumer, which has exclusive
      * access to the stage, with the stage's edit target set to the session
      * layer.
      *
-     * Validation (all checked before anything is authored, so a failure leaves
-     * the stage untouched):
-     *   - @p parent_path is a valid, existing prim path (the absolute root
-     *     "/" is accepted);
-     *   - neither the parent nor any of its ancestors is a UsdGeomGprim, since
-     *     USD forbids nesting gprims;
-     *   - @p type is a known built-in type.
+     * Handles the full CreatePrimRequest surface:
+     *   - a built-in typed prim (Cube/Sphere/Cone/Cylinder/Capsule/Plane/Xform),
+     *     or a typeless PRIM_TYPE_REF prim carrying a reference or payload arc
+     *     (@c ref_type) to @c reference_path;
+     *   - an optional local transform, authored verbatim as the prim's local
+     *     transform relative to its parent.
      *
-     * @param out On success, receives the resolved name/path and the authored
-     *            default attribute values.
-     * @return true if the prim was created, false otherwise. Never throws.
+     * Validation (all checked before anything is authored, if additional failures
+     * occur during authoring, any stale artifacts will be undone.):
+     *   - @c parent_path is a valid, existing, active prim path ("/" accepted);
+     *   - for a gprim, neither the parent nor any ancestor is a gprim;
+     *   - for a reference prim, @c reference_path resolves to an existing USD
+     *     file under the uploads root (see ReferencePathResolver);
+     *   - @c type is a known built-in type or PRIM_TYPE_REF.
+     *
+     * @param uploads_root The server's uploads root (the "root download folder"),
+     *                     used to resolve a reference's asset path. The root- and
+     *                     edit-layer directories are taken from @p stage.
+     * @param out On success, receives the resolved name/path, the authored
+     *            default attribute values, and (for a reference prim) the arc
+     *            kind and broadcast reference path.
+     * @return The status of the creation. Never throws.
      */
-    static bool Create(const pxr::UsdStageRefPtr& stage,
-                       const std::string& parent_path,
-                       idtxcore::PrimType type,
+    static CreatePrimStatus Create(const pxr::UsdStageRefPtr& stage,
+                       const idtxcore::CreatePrimRequest& req,
+                       const std::string& uploads_root,
                        CreatedPrim& out);
 
     /**
@@ -86,9 +128,10 @@ public:
         AlreadyInState, ///< The prim already had the requested active state.
         InvalidPath,    ///< @p prim_path is empty or not a valid prim path.
         NotFound,       ///< No prim is defined at @p prim_path.
-        NotDeletable,   ///< The prim is the pseudo-root, or is introduced across
-                        ///< a reference/payload or defined in a sublayer, so it
-                        ///< cannot be deleted via a session-layer opinion.
+        NotDeletable,   ///< The prim is the pseudo-root, the stage's default
+                        ///< prim, or is introduced across a reference/payload or
+                        ///< defined in a sublayer, so it cannot be deleted via a
+                        ///< session-layer opinion.
         Failed          ///< USD rejected the authoring call.
     };
 

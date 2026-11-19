@@ -20,6 +20,7 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <string>
 
 #include <pxr/pxr.h>
@@ -43,6 +44,10 @@ public:
      *        usdz strategy based on the file extension.
      * @param stage          Live server-side stage (sidecar session layer over root).
      * @param original_path  Absolute path of the original USD file to overwrite.
+     * @param uploads_root   The server's uploads root. Only asset paths that
+     *                       resolve under it are re-anchored relative to the
+     *                       committed file; any other absolute path is kept
+     *                       verbatim (see StageCommitter.cpp).
      * @param out_error      Human-readable failure description on false.
      * @return true on success; false (with @p out_error set) on any failure.
      *         The original file is only replaced atomically once the write has
@@ -50,15 +55,18 @@ public:
      */
     static bool Commit(const pxr::UsdStageRefPtr& stage,
                        const std::string& original_path,
+                       const std::filesystem::path& uploads_root,
                        std::string& out_error);
 
 private:
     static bool CommitFlat(const pxr::UsdStageRefPtr& stage,
                            const std::string& original_path,
+                           const std::filesystem::path& uploads_root,
                            std::string& out_error);
 
     static bool CommitUsdz(const pxr::UsdStageRefPtr& stage,
                            const std::string& original_path,
+                           const std::filesystem::path& uploads_root,
                            std::string& out_error);
 };
 

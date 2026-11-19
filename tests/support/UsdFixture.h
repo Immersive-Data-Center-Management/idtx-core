@@ -20,6 +20,17 @@ namespace idtx::tests
 void WriteCubeUsda(const std::filesystem::path& dst);
 
 /**
+ * @brief Write a minimal scene whose default prim is a non-xformable `Scope`
+ *        (`Scope "Root"`) to @p dst. Overwrites any existing file. Throws on
+ *        failure.
+ *
+ * Used as a reference target to exercise the case where a CreatePrimRequest
+ * carries a transform the server cannot author because the composed prim is
+ * not xformable.
+ */
+void WriteScopeUsda(const std::filesystem::path& dst);
+
+/**
  * @brief Read back the resolved translate of @p prim_path from the USD file
  *        at @p usd_file. Returns true on success.
  *
