@@ -166,9 +166,11 @@ bool BuildBroadcastPayload(const Session& session,
 // (created under @p parent_path with the given @p type) stamped with
 // @p server_seq. Only the attribute fields that apply to the type are set. For
 // a reference prim the arc kind and broadcast reference path are included. When
-// @p transform_src is non-null, its local transform is echoed verbatim onto
-// the broadcast (the live-create path; the join snapshot omits it and conveys
-// position through a separate local xform frame instead).
+// @p transform_src is non-null AND the prim's transform was actually authored
+// (CreatedPrim::has_transform), its local transform is echoed verbatim onto the
+// broadcast (the live-create path); a transform the server could not author is
+// dropped. The join snapshot omits it and conveys position through a separate
+// local xform frame instead.
 std::string SerializeCreatePrimBroadcast(const Session& session,
                                          const std::string& parent_path,
                                          idtxcore::PrimType type,
@@ -196,10 +198,14 @@ std::string SerializeCreatePrimBroadcast(const Session& session,
         bcast->set_reference_path(prim.reference_path);
     }
 
-    if (transform_src)
+    if (transform_src && prim.has_transform)
     {
-        // Echo the request's local transform verbatim. Per-field has_*
-        // accessors keep this independent of the oneof's name.
+        // Echo the request's local transform only when PrimDispatcher actually
+        // authored it onto the prim (prim.has_transform). A transform that
+        // could not be authored — the prim is not xformable, e.g. a reference
+        // to a non-xformable target — is dropped so clients never place a
+        // transform the server never applied. Per-field has_* accessors keep
+        // this independent of the oneof's name.
         if (transform_src->has_seperate())
             *bcast->mutable_seperate() = transform_src->seperate();
         else if (transform_src->has_matrix())
@@ -1316,8 +1322,9 @@ void SessionManager::HandleCommand(Session& session, CreatePrimCommand& command)
 
     // It's required to broadcast the prim creation back to all clients, even the one, the command
     // was initiated by, as the prims are required to be created on the server first. The client
-    // follows and only creates based on this message. The local transform (if any) is echoed
-    // verbatim so clients can place the prim themselves.
+    // follows and only creates based on this message. The local transform is echoed verbatim so
+    // clients can place the prim themselves — but only when it was actually authored; a transform
+    // that could not be applied (prim not xformable) is dropped by SerializeCreatePrimBroadcast.
     const std::string payload =
         SerializeCreatePrimBroadcast(session, req.parent_path(), req.type(), created, seq, &req);
     BroadcastToAll(session, payload, seq);

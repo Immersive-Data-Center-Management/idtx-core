@@ -56,6 +56,13 @@ struct CreatedPrim
     bool                  has_ref = false;
     idtxcore::PrimRefType ref_type = idtxcore::PRIM_REF_REFERENCE;
     std::string           reference_path;
+
+    // True only when the request carried a local transform AND it was
+    // successfully authored onto the prim. A transform that could not be
+    // authored (the prim is not xformable, e.g. a reference to a non-xformable
+    // target) leaves this false, so SessionManager neither echoes nor
+    // broadcasts a transform the server never applied.
+    bool has_transform = false;
 };
 
 class PrimDispatcher

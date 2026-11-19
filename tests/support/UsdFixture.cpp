@@ -6,6 +6,7 @@
 
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/base/gf/vec3f.h>
+#include <pxr/base/tf/token.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/prim.h>
@@ -51,6 +52,30 @@ void WriteCubeUsda(const std::filesystem::path& dst)
     api.SetTranslate(pxr::GfVec3d(0.0, 0.0, 0.0));
 
     stage->SetDefaultPrim(root_xform.GetPrim());
+    stage->GetRootLayer()->Save();
+}
+
+void WriteScopeUsda(const std::filesystem::path& dst)
+{
+    std::error_code ec;
+    std::filesystem::create_directories(dst.parent_path(), ec);
+    if (std::filesystem::exists(dst, ec))
+    {
+        std::filesystem::remove(dst, ec);
+    }
+
+    auto stage = pxr::UsdStage::CreateNew(dst.string());
+    if (!stage)
+    {
+        throw std::runtime_error("Failed to create USD stage at " + dst.string());
+    }
+
+    // A Scope is a grouping prim that is NOT xformable, so referencing it yields
+    // a composed prim onto which a local transform cannot be authored.
+    auto root = stage->DefinePrim(pxr::SdfPath("/Root"), pxr::TfToken("Scope"));
+    if (!root) throw std::runtime_error("Failed to define /Root Scope.");
+
+    stage->SetDefaultPrim(root);
     stage->GetRootLayer()->Save();
 }
 

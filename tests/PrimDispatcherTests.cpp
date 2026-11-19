@@ -71,6 +71,9 @@ TEST_CASE("Create authors the request transform as the prim's local transform (m
     REQUIRE(PrimDispatcher::Create(stage, req, /*uploads_root=*/"", out)
             == PrimDispatcher::CreatePrimStatus::Ok);
 
+    // The transform was authored, so it is flagged for the broadcast.
+    CHECK(out.has_transform);
+
     // The transform is authored verbatim as the prim's LOCAL transform, so the
     // composed world is the parent's world composed with it: (10,20,30)+(1,2,3).
     pxr::GfMatrix4d expected(1.0);
@@ -100,6 +103,8 @@ TEST_CASE("Create separate-transform rotation matches UsdGeomXformCommonAPI Rota
     REQUIRE(PrimDispatcher::Create(stage, req, /*uploads_root=*/"", out)
             == PrimDispatcher::CreatePrimStatus::Ok);
 
+    CHECK(out.has_transform);
+
     // Independent expectation: author the same vectors through the official
     // XformCommonAPI with RotationOrderXYZ and read the composed matrix.
     auto ref = pxr::UsdGeomXform::Define(stage, pxr::SdfPath("/Ref"));
@@ -109,4 +114,23 @@ TEST_CASE("Create separate-transform rotation matches UsdGeomXformCommonAPI Rota
         pxr::UsdTimeCode::Default());
 
     CHECK(MatrixApprox(WorldOf(stage, out.prim_path), WorldOf(stage, "/Ref")));
+}
+
+TEST_CASE("Create leaves has_transform false when the request carries no transform")
+{
+    auto stage = pxr::UsdStage::CreateInMemory();
+    auto parent = pxr::UsdGeomXform::Define(stage, pxr::SdfPath("/Root"));
+    REQUIRE(parent);
+
+    idtxcore::CreatePrimRequest req;
+    req.set_parent_path("/Root");
+    req.set_type(idtxcore::PRIM_TYPE_XFORM);
+    // No matrix/seperate set.
+
+    CreatedPrim out;
+    REQUIRE(PrimDispatcher::Create(stage, req, /*uploads_root=*/"", out)
+            == PrimDispatcher::CreatePrimStatus::Ok);
+
+    // Nothing was requested, so nothing is flagged for the broadcast.
+    CHECK_FALSE(out.has_transform);
 }

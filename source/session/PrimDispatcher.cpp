@@ -509,12 +509,19 @@ PrimDispatcher::CreatePrimStatus PrimDispatcher::Create(const pxr::UsdStageRefPt
         }
 
         // Optional local transform: author it verbatim as the prim's local
-        // transform relative to its parent. Applies to every prim type.
+        // transform relative to its parent. Applies to every prim type that is
+        // xformable. out.has_transform records whether it was actually
+        // authored, so the caller only echoes/broadcasts a transform the
+        // server applied.
         pxr::GfMatrix4d local;
         if (LocalMatrixFromRequest(req, local))
         {
             const pxr::UsdPrim prim = stage->GetPrimAtPath(child);
-            if (!AuthorLocalTransform(prim, local))
+            if (AuthorLocalTransform(prim, local))
+            {
+                out.has_transform = true;
+            }
+            else
             {
                 IDTX_LOG(IDTX_WARN,
                          "CreatePrimRequest carried a transform but '{}' is not xformable; "

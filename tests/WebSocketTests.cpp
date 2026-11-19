@@ -468,6 +468,51 @@ TEST_CASE("create prim honors a local transform and echoes it on the broadcast")
     CHECK(cp.seperate().translation().z() == doctest::Approx(7.0));
 }
 
+TEST_CASE("create prim drops a transform that could not be authored (non-xformable reference target)")
+{
+    TestServer server;
+    server.WaitReady();
+
+    // A reference target whose default prim is a non-xformable Scope. A local
+    // transform cannot be authored onto a reference to it, so the broadcast
+    // must carry no transform — the server never applied one.
+    idtx::tests::WriteScopeUsda(server.uploads_root() / "kit" / "group.usda");
+
+    const std::string sid = CreateSession(server, "single_edit");
+
+    WsTestClient ws;
+    auto conn = ws.Connect("127.0.0.1", server.port(), "/ws?sid=" + sid);
+    REQUIRE(conn.handshake_ok);
+    DrainHandshake(ws);
+
+    ws.SendBinary(idtx::tests::BuildCreatePrimReferenceRequestWithTranslate(
+        sid, "/Root", idtxcore::PRIM_REF_REFERENCE, "/kit/group.usda",
+        5.0, 6.0, 7.0, /*request_id=*/72));
+
+    auto bcast = idtx::tests::WaitForMessage(
+        ws, std::chrono::milliseconds{2000},
+        [](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kCreatePrimBroadcast;
+        });
+    REQUIRE(bcast.has_value());
+    const auto& cp = bcast->create_prim_broadcast();
+    // The reference prim is created, but its transform is dropped.
+    CHECK(cp.type() == idtxcore::PRIM_TYPE_REF);
+    CHECK_FALSE(cp.has_seperate());
+    CHECK_FALSE(cp.has_matrix());
+
+    // The creation itself still succeeds: an unauthorable transform is
+    // non-fatal, not an error.
+    auto ack = idtx::tests::WaitForMessage(
+        ws, std::chrono::milliseconds{2000},
+        [](const idtxcore::BaseMessage& m) {
+            return m.message_case() == idtxcore::BaseMessage::kAck
+                && m.request_id() == 72;
+        });
+    REQUIRE(ack.has_value());
+    CHECK(ack->ack().ok());
+}
+
 TEST_CASE("create reference prim: broadcast carries type, ref kind and root-relative path")
 {
     TestServer server;
