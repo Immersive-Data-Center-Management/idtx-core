@@ -20,6 +20,7 @@
 
 #include <idtx/proto/transform.pb.h>
 #include <idtx/proto/prim.pb.h>
+#include <idtx/proto/attribute.pb.h>
 
 #include "FileWriteSlot.h"
 
@@ -195,6 +196,42 @@ struct SetPrimActiveCommand
 };
 
 /**
+ * @brief Author a bounded batch of arbitrary typed attribute default values on
+ *        one prim, with per-attribute (partial) success.
+ *
+ * The consumer validates each attribute against the composed prim, authors the
+ * valid subset into the session layer in one change block, broadcasts the
+ * authored subset to every client (including @c origin) under one server_seq,
+ * and sends @c origin a SetPrimAttributesAck listing only the failures. Unlike
+ * transforms there is no base_seq/staleness check: convergence comes from the
+ * seq-stamped echo (plan D1/D2). The request is owned via a unique_ptr so the
+ * command stays nothrow-movable as the mailbox requires.
+ */
+struct SetPrimAttributesCommand
+{
+    std::unique_ptr<const idtxcore::SetPrimAttributesRequest> request;
+
+    // Connection that sent the request; it receives the Ack and, like every
+    // other client, the attribute broadcast.
+    ConnectionId origin{};
+
+    // Client-assigned id echoed back in the Ack (0 if the client sent none).
+    std::uint64_t request_id{};
+
+    std::chrono::steady_clock::time_point received_at{
+        std::chrono::steady_clock::now()};
+
+    SetPrimAttributesCommand(std::unique_ptr<const idtxcore::SetPrimAttributesRequest> r,
+                             ConnectionId o, std::uint64_t id) noexcept
+        : request(std::move(r)), origin(o), request_id(id) {}
+    SetPrimAttributesCommand(SetPrimAttributesCommand&&) noexcept = default;
+    SetPrimAttributesCommand& operator=(SetPrimAttributesCommand&&) noexcept = default;
+    SetPrimAttributesCommand(const SetPrimAttributesCommand&) = delete;
+    SetPrimAttributesCommand& operator=(const SetPrimAttributesCommand&) = delete;
+    ~SetPrimAttributesCommand() noexcept = default;
+};
+
+/**
  * @brief Commit the session's overrides into the original USD file.
  *
  * The consumer writes the file; the file's layer is then reloaded off the
@@ -253,6 +290,7 @@ using SessionCommand = std::variant<
     SnapshotCommand,
     CreatePrimCommand,
     SetPrimActiveCommand,
+    SetPrimAttributesCommand,
     CommitCommand,
     FlushCommand,
     CorrectionCommand>;

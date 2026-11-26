@@ -43,6 +43,15 @@ struct AuthoringContext
     // path would broadcast a misleading frame in place of the delete.
     bool setting_active = false;
 
+    // A batch of arbitrary attribute defaults is being authored. The authored
+    // subset is broadcast explicitly (SetPrimAttributesBroadcast), so the
+    // listener must ignore the resync that creating/overwriting attribute
+    // specs fires: otherwise a plain attribute batch could spuriously bump
+    // server_seq, and on a prim that already authors xformOps the generic
+    // transform path could re-broadcast a transform frame out from under the
+    // explicit attribute broadcast.
+    bool setting_attributes = false;
+
     // A shared layer is being reloaded; every stage using it is notified.
     bool reload = false;
 

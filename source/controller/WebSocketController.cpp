@@ -7,6 +7,7 @@
 
 #include <idtx/proto/base.pb.h>
 #include <idtx/proto/transform.pb.h>
+#include <idtx/proto/attribute.pb.h>
 
 #include "session/Session.h"
 #include "session/SessionManager.h"
@@ -271,6 +272,41 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
             if (ack_msg.SerializeToString(&payload)) conn.send_binary(payload);
             break;
         }
+        case idtxcore::BaseMessage::kSetPrimAttributes:
+        {
+            // Queue the attribute batch for the session's consumer. When
+            // accepted, the consumer validates each attribute, authors the valid
+            // subset, broadcasts it to every client (including this one) and
+            // sends this client a SetPrimAttributesAck listing only failures.
+            // Per plan D5 the ONLY response type is the Ack: a transport
+            // rejection is that same message with every attribute failed.
+            const std::uint64_t request_id = msg.request_id();
+            const idtxcore::SetPrimAttributesRequest& req = msg.set_prim_attributes();
+            const auto status = m_manager_->SubmitSetPrimAttributesCommand(
+                ws_data->session_id, req, ws_data->connection_id, request_id);
+            if (status == SubmitStatus::Accepted) break;
+
+            idtxcore::BaseMessage ack_msg;
+            ack_msg.set_session_id(ws_data->session_id);
+            ack_msg.set_request_id(request_id);
+            auto* ack = ack_msg.mutable_set_prim_attributes_ack();
+            ack->set_prim_path(req.prim_path());
+            const idtxcore::AttributeFailureReason reason =
+                (status == SubmitStatus::QueueFull)
+                    ? idtxcore::ATTRIBUTE_FAILURE_QUEUE_FULL
+                    : (status == SubmitStatus::RequestTooLarge)
+                          ? idtxcore::ATTRIBUTE_FAILURE_REQUEST_TOO_LARGE
+                          : idtxcore::ATTRIBUTE_FAILURE_SESSION_CLOSING; // incl. UnknownSession
+            for (const auto& a : req.attributes())
+            {
+                auto* f = ack->add_failed();
+                f->set_name(a.name());
+                f->set_reason(reason);
+            }
+            std::string payload;
+            if (ack_msg.SerializeToString(&payload)) conn.send_binary(payload);
+            break;
+        }
         case idtxcore::BaseMessage::kSnapshotRequest:
         {
             // Queue a snapshot of the session's state for this client, for
@@ -297,6 +333,8 @@ void WebSocketController::OnMessage(crow::websocket::connection& conn,
         case idtxcore::BaseMessage::kXformBroadcast:
         case idtxcore::BaseMessage::kCreatePrimBroadcast:
         case idtxcore::BaseMessage::kSetPrimActiveBroadcast:
+        case idtxcore::BaseMessage::kSetPrimAttributesBroadcast:
+        case idtxcore::BaseMessage::kSetPrimAttributesAck:
         case idtxcore::BaseMessage::kLayerReloaded:
         case idtxcore::BaseMessage::kAck:
         case idtxcore::BaseMessage::kError:

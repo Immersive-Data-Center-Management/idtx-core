@@ -1,8 +1,11 @@
 #include "PrimDispatcher.h"
 
+#include "AttributeDispatcher.h"
+
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <type_traits>
 
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/rotation.h>
@@ -27,6 +30,7 @@
 #include <pxr/usd/usd/editTarget.h>
 #include <pxr/usd/usd/references.h>
 #include <pxr/usd/usd/schemaRegistry.h>
+#include <pxr/usd/usdGeom/boundable.h>
 #include <pxr/usd/usdGeom/capsule.h>
 #include <pxr/usd/usdGeom/cone.h>
 #include <pxr/usd/usdGeom/cube.h>
@@ -38,6 +42,7 @@
 #include <pxr/usd/usdGeom/xform.h>
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/xformOp.h>
+#include <pxr/usd/usdGeom/metrics.h>
 
 #include "ReferencePathResolver.h"
 
@@ -132,13 +137,78 @@ pxr::SdfPath UniqueChildPath(const pxr::UsdStageRefPtr& stage,
 // name is equivalent to the typed UsdGeomXxx::Define for these concrete
 // schemas. Attribute values are read back separately, after the enclosing
 // SdfChangeBlock closes and the stage has recomposed.
+// Author 1 m based dimensions in the stage's units, instead of leaving the
+// schema fallbacks (twice that size, and in stage units, so e.g. a 2 cm cube
+// in a centimetre stage): cube edge 1 m; sphere, cylinder and cone 1 m across
+// and (cylinder, cone) 1 m high; capsule 1 m high in total, 0.5 m across;
+// plane 1 x 1 m. The axis keeps its schema fallback.
+void AuthorUnitDimensions(const pxr::UsdPrim& prim, idtxcore::PrimType type)
+{
+    const double meters_per_unit = pxr::UsdGeomGetStageMetersPerUnit(prim.GetStage());
+    const double meter = meters_per_unit > 0.0 ? 1.0 / meters_per_unit : 1.0; // 1 m in stage units
+    switch (type)
+    {
+        case idtxcore::PRIM_TYPE_CUBE:
+            pxr::UsdGeomCube(prim).CreateSizeAttr().Set(1.0 * meter);
+            break;
+        case idtxcore::PRIM_TYPE_SPHERE:
+            pxr::UsdGeomSphere(prim).CreateRadiusAttr().Set(0.5 * meter);
+            break;
+        case idtxcore::PRIM_TYPE_CONE:
+        {
+            const pxr::UsdGeomCone cone(prim);
+            cone.CreateRadiusAttr().Set(0.5 * meter);
+            cone.CreateHeightAttr().Set(1.0 * meter);
+            break;
+        }
+        case idtxcore::PRIM_TYPE_CYLINDER:
+        {
+            const pxr::UsdGeomCylinder cylinder(prim);
+            cylinder.CreateRadiusAttr().Set(0.5 * meter);
+            cylinder.CreateHeightAttr().Set(1.0 * meter);
+            break;
+        }
+        case idtxcore::PRIM_TYPE_CAPSULE:
+        {
+            // USD's capsule height excludes the two hemispherical caps.
+            const pxr::UsdGeomCapsule capsule(prim);
+            capsule.CreateRadiusAttr().Set(0.25 * meter);
+            capsule.CreateHeightAttr().Set(0.5 * meter);
+            break;
+        }
+        case idtxcore::PRIM_TYPE_PLANE:
+        {
+            const pxr::UsdGeomPlane plane(prim);
+            plane.CreateWidthAttr().Set(1.0 * meter);
+            plane.CreateLengthAttr().Set(1.0 * meter);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+// Author the extent matching the prim's current dimensions, so bounds queries
+// agree with the authored size. No-op for prims that are not boundable.
+void AuthorExtent(const pxr::UsdPrim& prim)
+{
+    const pxr::UsdGeomBoundable boundable(prim);
+    if (!boundable) return;
+    pxr::VtVec3fArray extent;
+    if (pxr::UsdGeomBoundable::ComputeExtentFromPlugins(boundable, pxr::UsdTimeCode::Default(), &extent))
+        boundable.CreateExtentAttr().Set(extent);
+}
+
 bool AuthorPrim(const pxr::UsdStageRefPtr& stage,
                 const pxr::SdfPath& path,
                 idtxcore::PrimType type)
 {
     const pxr::TfToken type_name = BaseNameFor(type);
     if (type_name.IsEmpty()) return false;
-    return static_cast<bool>(stage->DefinePrim(path, type_name));
+    const pxr::UsdPrim prim = stage->DefinePrim(path, type_name);
+    if (!prim) return false;
+    AuthorUnitDimensions(prim, type);
+    return true;
 }
 
 // Build the LOCAL GfMatrix4d carried by @p req. Returns false when the
@@ -345,6 +415,7 @@ const char* PrimDispatcher::CreatePrimStatusToString(CreatePrimStatus status) no
         case CreatePrimStatus::InvalidType:         return "invalid_type";
         case CreatePrimStatus::InvalidParent:       return "invalid_parent";
         case CreatePrimStatus::InvalidReference:    return "invalid_reference";
+        case CreatePrimStatus::InvalidAttribute:    return "invalid_attribute";
         case CreatePrimStatus::Failed:              return "author_failed";
     }
 
@@ -504,7 +575,45 @@ PrimDispatcher::CreatePrimStatus PrimDispatcher::Create(const pxr::UsdStageRefPt
                 IDTX_LOG(IDTX_ERROR, "Failed to author {} at '{}'.", base_name.GetString(), out.prim_path);
                 return CreatePrimStatus::Failed;
             }
-            // Read the (fallback) default attributes authored for the type.
+        }
+
+        // The request's attributes, authored after the defaults so they override
+        // them. All or nothing: a create whose attributes cannot all be authored
+        // is removed again and rejected.
+        if (req.attributes_size() > 0)
+        {
+            idtxcore::SetPrimAttributesRequest attributes;
+            attributes.set_prim_path(out.prim_path);
+            *attributes.mutable_attributes() = req.attributes();
+            const AttributeAssetContext assets{
+                std::filesystem::path(stage->GetRootLayer()->GetRealPath()).parent_path(),
+                std::filesystem::path(uploads_root)};
+            const AttributeDispatcher::AuthoringResult authored =
+                AttributeDispatcher::Author(stage, attributes, assets);
+            for (const auto& result : authored.attributes)
+            {
+                if (result.ok) continue;
+                idtxcore::AttributeError& error = out.attribute_failures.emplace_back();
+                error.set_name(result.name);
+                error.set_reason(AttributeDispatcher::ToProto(result.reason));
+                error.set_detail(result.detail);
+            }
+            if (!out.attribute_failures.empty())
+            {
+                for (const auto& error : out.attribute_failures)
+                    IDTX_LOG(IDTX_WARN, "CreatePrimRequest attribute '{}' on '{}' rejected: {} {}", error.name(),
+                             out.prim_path, idtxcore::AttributeFailureReason_Name(error.reason()), error.detail());
+                stage->RemovePrim(child);
+                return CreatePrimStatus::InvalidAttribute;
+            }
+            for (const auto& result : authored.attributes)
+                out.attributes.push_back(result.wire);
+        }
+
+        if (!is_reference)
+        {
+            // Bounds follow the final dimensions; report the authored values.
+            AuthorExtent(stage->GetPrimAtPath(child));
             ReadAttributes(stage->GetPrimAtPath(child), type, out);
         }
 
@@ -636,6 +745,34 @@ PrimDispatcher::SetActiveStatus PrimDispatcher::SetActive(const pxr::UsdStageRef
     }
 
     return SetActiveStatus::Ok;
+}
+
+void PrimDispatcher::ReadAuthoredDimensions(const pxr::SdfPrimSpecHandle& spec, idtxcore::PrimType type,
+                                            CreatedPrim& out)
+{
+    ReadSchemaDefaults(type, out);
+    if (!spec) return;
+
+    const auto authored = [&spec](const pxr::TfToken& name, auto& value) {
+        const pxr::SdfAttributeSpecHandle attr = spec->GetAttributeAtPath(spec->GetPath().AppendProperty(name));
+        if (!attr || !attr->HasDefaultValue()) return false;
+        const pxr::VtValue v = attr->GetDefaultValue();
+        using T = std::decay_t<decltype(value)>;
+        if (!v.IsHolding<T>()) return false;
+        value = v.UncheckedGet<T>();
+        return true;
+    };
+    // Only overrides the fields the type has (ReadSchemaDefaults set has_*).
+    if (out.has_size) authored(pxr::UsdGeomTokens->size, out.size);
+    if (out.has_height) authored(pxr::UsdGeomTokens->height, out.height);
+    if (out.has_radius) authored(pxr::UsdGeomTokens->radius, out.radius);
+    if (out.has_width) authored(pxr::UsdGeomTokens->width, out.width);
+    if (out.has_length) authored(pxr::UsdGeomTokens->length, out.length);
+    if (out.has_axis)
+    {
+        pxr::TfToken axis;
+        if (authored(pxr::UsdGeomTokens->axis, axis)) out.axis = axis.GetString();
+    }
 }
 
 void PrimDispatcher::ReadSchemaDefaults(idtxcore::PrimType type, CreatedPrim& out)

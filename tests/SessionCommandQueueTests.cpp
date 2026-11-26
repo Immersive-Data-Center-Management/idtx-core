@@ -615,6 +615,132 @@ TEST_CASE("queue: join snapshot replays created prims before SnapshotComplete")
     CHECK(create_frame->create_prim_broadcast().has_size());
 }
 
+namespace
+{
+// A CreatePrimRequest for a Cube under /Root carrying @p attributes.
+std::string BuildCreateWithAttributes(const std::string& sid, std::uint64_t request_id,
+                                      const std::vector<idtxcore::PrimAttribute>& attributes)
+{
+    idtxcore::BaseMessage msg;
+    msg.set_session_id(sid);
+    msg.set_request_id(request_id);
+    auto* req = msg.mutable_create_prim();
+    req->set_session_id(sid);
+    req->set_parent_path("/Root");
+    req->set_type(idtxcore::PRIM_TYPE_CUBE);
+    for (const auto& attribute : attributes)
+        *req->add_attributes() = attribute;
+    std::string out;
+    msg.SerializeToString(&out);
+    return out;
+}
+} // namespace
+
+TEST_CASE("create with attributes: the broadcast carries them and the authored size")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "collaborative_edit");
+    WsTestClient a;
+    Join(a, server, sid);
+
+    a.SendBinary(BuildCreateWithAttributes(
+        sid, 7,
+        {idtx::tests::MakeDoubleAttr("size", "double", {3.0}),
+         idtx::tests::MakeDoubleAttr("primvars:displayColor", "color3f", {0.0, 1.0, 0.0}, /*is_array=*/true)}));
+    const auto created = Collect(a, 1, std::chrono::seconds{5}, [](const idtxcore::BaseMessage& m) {
+        return m.message_case() == idtxcore::BaseMessage::kCreatePrimBroadcast;
+    });
+    REQUIRE(created.size() == 1);
+    const auto& cp = created.front().create_prim_broadcast();
+    CHECK(cp.size() == doctest::Approx(3.0));
+    REQUIRE(cp.attributes_size() == 2);
+    CHECK(cp.attributes(0).name() == "size");
+    CHECK(cp.attributes(1).name() == "primvars:displayColor");
+    CHECK(cp.attributes(1).type_name() == "color3f");
+
+    std::vector<idtxcore::BaseMessage> received;
+    const auto ack = WaitForAck(a, 7, received);
+    REQUIRE(ack.has_value());
+    CHECK(ack->ack().ok());
+}
+
+TEST_CASE("create with an attribute it cannot author: rejected, nothing created")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "collaborative_edit");
+    WsTestClient a;
+    Join(a, server, sid);
+
+    a.SendBinary(BuildCreateWithAttributes(
+        sid, 8, {idtx::tests::MakeDoubleAttr("xformOp:translate", "double3", {1.0, 2.0, 3.0})}));
+    std::vector<idtxcore::BaseMessage> received;
+    const auto ack = WaitForAck(a, 8, received);
+    REQUIRE(ack.has_value());
+    CHECK_FALSE(ack->ack().ok());
+    CHECK(ack->ack().error() == "invalid_attribute");
+
+    // No creation was broadcast before the Ack, and none follows it.
+    for (const auto& m : received)
+        CHECK(m.message_case() != idtxcore::BaseMessage::kCreatePrimBroadcast);
+    for (const auto& m : Barrier(a, sid))
+        CHECK(m.message_case() != idtxcore::BaseMessage::kCreatePrimBroadcast);
+}
+
+TEST_CASE("join snapshot: a created prim reports its authored size and attributes")
+{
+    TestServer server;
+    server.WaitReady();
+    const std::string sid = CreateSession(server, "collaborative_edit");
+    WsTestClient a;
+    Join(a, server, sid);
+
+    a.SendBinary(BuildCreateWithAttributes(
+        sid, 9,
+        {idtx::tests::MakeDoubleAttr("size", "double", {3.0}),
+         idtx::tests::MakeDoubleAttr("primvars:displayColor", "color3f", {0.0, 0.0, 1.0}, /*is_array=*/true)}));
+    const auto created = Collect(a, 1, std::chrono::seconds{5}, [](const idtxcore::BaseMessage& m) {
+        return m.message_case() == idtxcore::BaseMessage::kCreatePrimBroadcast;
+    });
+    REQUIRE(created.size() == 1);
+    const auto& live = created.front().create_prim_broadcast();
+    const std::string path = live.parent_path() + "/" + live.prim_name();
+
+    WsTestClient b;
+    auto conn = b.Connect("127.0.0.1", server.port(), "/ws?sid=" + sid);
+    REQUIRE(conn.handshake_ok);
+    std::optional<idtxcore::CreatePrimBroadcast> create_frame;
+    std::optional<idtxcore::SetPrimAttributesBroadcast> attribute_frame;
+    bool complete = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (!complete && std::chrono::steady_clock::now() < deadline)
+    {
+        auto frame = b.ReadBinary(std::chrono::milliseconds{2000});
+        if (!frame) break;
+        idtxcore::BaseMessage msg;
+        if (!idtx::tests::ParseBaseMessage(*frame, msg)) continue;
+        if (msg.message_case() == idtxcore::BaseMessage::kCreatePrimBroadcast &&
+            msg.create_prim_broadcast().prim_name() == live.prim_name())
+            create_frame = msg.create_prim_broadcast();
+        else if (msg.message_case() == idtxcore::BaseMessage::kSetPrimAttributesBroadcast &&
+                 msg.set_prim_attributes_broadcast().prim_path() == path)
+            attribute_frame = msg.set_prim_attributes_broadcast();
+        else if (IsSnapshotComplete(msg))
+            complete = true;
+    }
+    REQUIRE(complete);
+    REQUIRE(create_frame.has_value());
+    // The create frame reports the authored size, not the schema fallback, so a
+    // client that ignores attribute frames still builds the right prim.
+    CHECK(create_frame->size() == doctest::Approx(3.0));
+    REQUIRE(attribute_frame.has_value());
+    bool has_color = false;
+    for (const auto& attribute : attribute_frame->attributes())
+        has_color = has_color || attribute.name() == "primvars:displayColor";
+    CHECK(has_color);
+}
+
 TEST_CASE("queue: commit writes every acknowledged update to the file")
 {
     TestServer server;

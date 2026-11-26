@@ -10,13 +10,16 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <pxr/pxr.h>
+#include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 
 #include <idtx/utils/Logger.h>
 
+#include <idtx/proto/attribute.pb.h>
 #include <idtx/proto/prim.pb.h>
 
 namespace idtx
@@ -63,6 +66,12 @@ struct CreatedPrim
     // target) leaves this false, so SessionManager neither echoes nor
     // broadcasts a transform the server never applied.
     bool has_transform = false;
+
+    // The request's attributes as authored (role-preserving wire values), for
+    // the broadcast. When the create fails with InvalidAttribute instead, the
+    // attributes that could not be authored.
+    std::vector<idtxcore::PrimAttribute>  attributes;
+    std::vector<idtxcore::AttributeError> attribute_failures;
 };
 
 class PrimDispatcher
@@ -80,6 +89,7 @@ public:
         InvalidType,        ///< The prim tye to be authored is unknown
         InvalidParent,      ///< The parent of the prim to be authored is invalid (e.g. nested GPrims)
         InvalidReference,   ///< The reference is invalid or unresolvable
+        InvalidAttribute,   ///< An attribute of the request could not be authored; nothing was created
         Failed,             ///< openUSD failed to author the prim
     };
     
@@ -183,13 +193,21 @@ public:
      *        @p type, read from the USD schema registry rather than a live
      *        prim. Only the members that apply to @p type are set.
      *
-     * The unified Sdf-based join snapshot describes session-created prims
-     * without composing a stage, so it cannot read fallbacks off a UsdPrim
-     * (ReadAttributes). A created prim never authors its shape attributes into
-     * the session layer, so its values are exactly the type's schema
-     * fallbacks, which this returns stage-free.
+     * Stage-free: no UsdPrim is needed (see ReadAuthoredDimensions).
      */
     static void ReadSchemaDefaults(idtxcore::PrimType type, CreatedPrim& out);
+
+    /**
+     * @brief Fill @p out with the shape attributes of a created prim as its
+     *        session-layer @p spec authors them, falling back to the type's
+     *        schema defaults for any it does not author.
+     *
+     * The unified Sdf-based join snapshot describes session-created prims
+     * without composing a stage (a soft-deleted prim's created children are not
+     * on the composed stage), so it reads the authored values off the spec.
+     */
+    static void ReadAuthoredDimensions(const pxr::SdfPrimSpecHandle& spec, idtxcore::PrimType type,
+                                       CreatedPrim& out);
 };
 
 } // namespace session

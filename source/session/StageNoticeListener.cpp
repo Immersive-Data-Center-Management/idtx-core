@@ -147,6 +147,22 @@ void StageNoticeListener::OnObjectsChanged(const pxr::UsdNotice::ObjectsChanged&
         return;
     }
 
+    // An arbitrary-attribute batch announces itself with a
+    // SetPrimAttributesBroadcast (sent to every client, including the
+    // originator). Creating a new SdfAttributeSpec can fire a resync of the
+    // prim path; dropping it here keeps the generic transform path from
+    // spuriously bumping server_seq, and - on a prim that already authors
+    // xformOps - from re-broadcasting a transform frame out from under the
+    // explicit attribute broadcast. Same defense-in-depth as creating /
+    // setting_active above.
+    if (own_command && context.setting_attributes)
+    {
+        IDTX_LOG(IDTX_DEBUG,
+                 "Ignoring stage notice in session {}: attributes broadcast explicitly.",
+                 session->id);
+        return;
+    }
+
     // -----------------------------------------------------------------
     // Reload branch
     //

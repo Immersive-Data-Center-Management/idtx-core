@@ -31,6 +31,7 @@
 #include "google/protobuf/generated_enum_reflection.h"
 #include "google/protobuf/unknown_field_set.h"
 #include "transform.pb.h"
+#include "attribute.pb.h"
 // @@protoc_insertion_point(includes)
 
 // Must be included last.
@@ -751,6 +752,7 @@ class CreatePrimRequest final : public ::google::protobuf::Message
 
   // accessors -------------------------------------------------------
   enum : int {
+    kAttributesFieldNumber = 8,
     kSessionIdFieldNumber = 1,
     kParentPathFieldNumber = 2,
     kReferencePathFieldNumber = 5,
@@ -759,6 +761,23 @@ class CreatePrimRequest final : public ::google::protobuf::Message
     kSeperateFieldNumber = 6,
     kMatrixFieldNumber = 7,
   };
+  // repeated .idtxcore.PrimAttribute attributes = 8;
+  int attributes_size() const;
+  private:
+  int _internal_attributes_size() const;
+
+  public:
+  void clear_attributes() ;
+  ::idtxcore::PrimAttribute* PROTOBUF_NONNULL mutable_attributes(int index);
+  ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>* PROTOBUF_NONNULL mutable_attributes();
+
+  private:
+  const ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>& _internal_attributes() const;
+  ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>* PROTOBUF_NONNULL _internal_mutable_attributes();
+  public:
+  const ::idtxcore::PrimAttribute& attributes(int index) const;
+  ::idtxcore::PrimAttribute* PROTOBUF_NONNULL add_attributes();
+  const ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>& attributes() const;
   // string session_id = 1;
   void clear_session_id() ;
   const ::std::string& session_id() const;
@@ -874,8 +893,8 @@ class CreatePrimRequest final : public ::google::protobuf::Message
   inline bool has_transform() const;
   inline void clear_has_transform();
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<3, 7,
-                                   2, 70,
+  static const ::google::protobuf::internal::TcParseTable<3, 8,
+                                   3, 78,
                                    2>
       _table_;
 
@@ -896,6 +915,7 @@ class CreatePrimRequest final : public ::google::protobuf::Message
         const CreatePrimRequest& from_msg);
     ::google::protobuf::internal::HasBits<1> _has_bits_;
     ::google::protobuf::internal::CachedSize _cached_size_;
+    ::google::protobuf::RepeatedPtrField< ::idtxcore::PrimAttribute > attributes_;
     ::google::protobuf::internal::ArenaStringPtr session_id_;
     ::google::protobuf::internal::ArenaStringPtr parent_path_;
     ::google::protobuf::internal::ArenaStringPtr reference_path_;
@@ -1064,6 +1084,7 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
 
   // accessors -------------------------------------------------------
   enum : int {
+    kAttributesFieldNumber = 14,
     kParentPathFieldNumber = 1,
     kPrimNameFieldNumber = 2,
     kAxisFieldNumber = 7,
@@ -1078,6 +1099,23 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
     kSeperateFieldNumber = 12,
     kMatrixFieldNumber = 13,
   };
+  // repeated .idtxcore.PrimAttribute attributes = 14;
+  int attributes_size() const;
+  private:
+  int _internal_attributes_size() const;
+
+  public:
+  void clear_attributes() ;
+  ::idtxcore::PrimAttribute* PROTOBUF_NONNULL mutable_attributes(int index);
+  ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>* PROTOBUF_NONNULL mutable_attributes();
+
+  private:
+  const ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>& _internal_attributes() const;
+  ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>* PROTOBUF_NONNULL _internal_mutable_attributes();
+  public:
+  const ::idtxcore::PrimAttribute& attributes(int index) const;
+  ::idtxcore::PrimAttribute* PROTOBUF_NONNULL add_attributes();
+  const ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>& attributes() const;
   // string parent_path = 1;
   void clear_parent_path() ;
   const ::std::string& parent_path() const;
@@ -1264,8 +1302,8 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
   inline bool has_transform() const;
   inline void clear_has_transform();
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<4, 13,
-                                   2, 83,
+  static const ::google::protobuf::internal::TcParseTable<4, 14,
+                                   3, 83,
                                    2>
       _table_;
 
@@ -1286,6 +1324,7 @@ class CreatePrimBroadcast final : public ::google::protobuf::Message
         const CreatePrimBroadcast& from_msg);
     ::google::protobuf::internal::HasBits<1> _has_bits_;
     ::google::protobuf::internal::CachedSize _cached_size_;
+    ::google::protobuf::RepeatedPtrField< ::idtxcore::PrimAttribute > attributes_;
     ::google::protobuf::internal::ArenaStringPtr parent_path_;
     ::google::protobuf::internal::ArenaStringPtr prim_name_;
     ::google::protobuf::internal::ArenaStringPtr axis_;
@@ -1333,7 +1372,7 @@ inline void CreatePrimRequest::clear_session_id() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.session_id_.ClearToEmpty();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000001U);
+                  0x00000002U);
 }
 inline const ::std::string& CreatePrimRequest::session_id() const
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -1343,13 +1382,13 @@ inline const ::std::string& CreatePrimRequest::session_id() const
 template <typename Arg_, typename... Args_>
 PROTOBUF_ALWAYS_INLINE void CreatePrimRequest::set_session_id(Arg_&& arg, Args_... args) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
-  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
   _impl_.session_id_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimRequest.session_id)
 }
 inline ::std::string* PROTOBUF_NONNULL CreatePrimRequest::mutable_session_id()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
   ::std::string* _s = _internal_mutable_session_id();
   // @@protoc_insertion_point(field_mutable:idtxcore.CreatePrimRequest.session_id)
   return _s;
@@ -1369,10 +1408,10 @@ inline ::std::string* PROTOBUF_NONNULL CreatePrimRequest::_internal_mutable_sess
 inline ::std::string* PROTOBUF_NULLABLE CreatePrimRequest::release_session_id() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimRequest.session_id)
-  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000001U)) {
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
     return nullptr;
   }
-  ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
   auto* released = _impl_.session_id_.Release();
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
     _impl_.session_id_.Set("", GetArena());
@@ -1382,9 +1421,9 @@ inline ::std::string* PROTOBUF_NULLABLE CreatePrimRequest::release_session_id() 
 inline void CreatePrimRequest::set_allocated_session_id(::std::string* PROTOBUF_NULLABLE value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
   }
   _impl_.session_id_.SetAllocated(value, GetArena());
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.session_id_.IsDefault()) {
@@ -1398,7 +1437,7 @@ inline void CreatePrimRequest::clear_parent_path() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.parent_path_.ClearToEmpty();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000002U);
+                  0x00000004U);
 }
 inline const ::std::string& CreatePrimRequest::parent_path() const
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -1408,13 +1447,13 @@ inline const ::std::string& CreatePrimRequest::parent_path() const
 template <typename Arg_, typename... Args_>
 PROTOBUF_ALWAYS_INLINE void CreatePrimRequest::set_parent_path(Arg_&& arg, Args_... args) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
-  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   _impl_.parent_path_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimRequest.parent_path)
 }
 inline ::std::string* PROTOBUF_NONNULL CreatePrimRequest::mutable_parent_path()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   ::std::string* _s = _internal_mutable_parent_path();
   // @@protoc_insertion_point(field_mutable:idtxcore.CreatePrimRequest.parent_path)
   return _s;
@@ -1434,10 +1473,10 @@ inline ::std::string* PROTOBUF_NONNULL CreatePrimRequest::_internal_mutable_pare
 inline ::std::string* PROTOBUF_NULLABLE CreatePrimRequest::release_parent_path() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimRequest.parent_path)
-  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000004U)) {
     return nullptr;
   }
-  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
   auto* released = _impl_.parent_path_.Release();
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
     _impl_.parent_path_.Set("", GetArena());
@@ -1447,9 +1486,9 @@ inline ::std::string* PROTOBUF_NULLABLE CreatePrimRequest::release_parent_path()
 inline void CreatePrimRequest::set_allocated_parent_path(::std::string* PROTOBUF_NULLABLE value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
   }
   _impl_.parent_path_.SetAllocated(value, GetArena());
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.parent_path_.IsDefault()) {
@@ -1463,7 +1502,7 @@ inline void CreatePrimRequest::clear_type() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.type_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000008U);
+                  0x00000010U);
 }
 inline ::idtxcore::PrimType CreatePrimRequest::type() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimRequest.type)
@@ -1471,7 +1510,7 @@ inline ::idtxcore::PrimType CreatePrimRequest::type() const {
 }
 inline void CreatePrimRequest::set_type(::idtxcore::PrimType value) {
   _internal_set_type(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimRequest.type)
 }
 inline ::idtxcore::PrimType CreatePrimRequest::_internal_type() const {
@@ -1485,14 +1524,14 @@ inline void CreatePrimRequest::_internal_set_type(::idtxcore::PrimType value) {
 
 // optional .idtxcore.PrimRefType ref_type = 4;
 inline bool CreatePrimRequest::has_ref_type() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000010U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000020U);
   return value;
 }
 inline void CreatePrimRequest::clear_ref_type() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.ref_type_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000010U);
+                  0x00000020U);
 }
 inline ::idtxcore::PrimRefType CreatePrimRequest::ref_type() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimRequest.ref_type)
@@ -1500,7 +1539,7 @@ inline ::idtxcore::PrimRefType CreatePrimRequest::ref_type() const {
 }
 inline void CreatePrimRequest::set_ref_type(::idtxcore::PrimRefType value) {
   _internal_set_ref_type(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimRequest.ref_type)
 }
 inline ::idtxcore::PrimRefType CreatePrimRequest::_internal_ref_type() const {
@@ -1514,14 +1553,14 @@ inline void CreatePrimRequest::_internal_set_ref_type(::idtxcore::PrimRefType va
 
 // optional string reference_path = 5;
 inline bool CreatePrimRequest::has_reference_path() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000004U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000008U);
   return value;
 }
 inline void CreatePrimRequest::clear_reference_path() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.reference_path_.ClearToEmpty();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000004U);
+                  0x00000008U);
 }
 inline const ::std::string& CreatePrimRequest::reference_path() const
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -1531,13 +1570,13 @@ inline const ::std::string& CreatePrimRequest::reference_path() const
 template <typename Arg_, typename... Args_>
 PROTOBUF_ALWAYS_INLINE void CreatePrimRequest::set_reference_path(Arg_&& arg, Args_... args) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
-  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   _impl_.reference_path_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimRequest.reference_path)
 }
 inline ::std::string* PROTOBUF_NONNULL CreatePrimRequest::mutable_reference_path()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   ::std::string* _s = _internal_mutable_reference_path();
   // @@protoc_insertion_point(field_mutable:idtxcore.CreatePrimRequest.reference_path)
   return _s;
@@ -1557,10 +1596,10 @@ inline ::std::string* PROTOBUF_NONNULL CreatePrimRequest::_internal_mutable_refe
 inline ::std::string* PROTOBUF_NULLABLE CreatePrimRequest::release_reference_path() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimRequest.reference_path)
-  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000004U)) {
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000008U)) {
     return nullptr;
   }
-  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
   auto* released = _impl_.reference_path_.Release();
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
     _impl_.reference_path_.Set("", GetArena());
@@ -1570,9 +1609,9 @@ inline ::std::string* PROTOBUF_NULLABLE CreatePrimRequest::release_reference_pat
 inline void CreatePrimRequest::set_allocated_reference_path(::std::string* PROTOBUF_NULLABLE value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
   }
   _impl_.reference_path_.SetAllocated(value, GetArena());
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.reference_path_.IsDefault()) {
@@ -1723,6 +1762,56 @@ inline ::idtxcore::Matrix4dTransform* PROTOBUF_NONNULL CreatePrimRequest::mutabl
   return _msg;
 }
 
+// repeated .idtxcore.PrimAttribute attributes = 8;
+inline int CreatePrimRequest::_internal_attributes_size() const {
+  return _internal_attributes().size();
+}
+inline int CreatePrimRequest::attributes_size() const {
+  return _internal_attributes_size();
+}
+inline ::idtxcore::PrimAttribute* PROTOBUF_NONNULL CreatePrimRequest::mutable_attributes(int index)
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_mutable:idtxcore.CreatePrimRequest.attributes)
+  return _internal_mutable_attributes()->Mutable(index);
+}
+inline ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>* PROTOBUF_NONNULL CreatePrimRequest::mutable_attributes()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000001U);
+  // @@protoc_insertion_point(field_mutable_list:idtxcore.CreatePrimRequest.attributes)
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _internal_mutable_attributes();
+}
+inline const ::idtxcore::PrimAttribute& CreatePrimRequest::attributes(int index) const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.CreatePrimRequest.attributes)
+  return _internal_attributes().Get(index);
+}
+inline ::idtxcore::PrimAttribute* PROTOBUF_NONNULL CreatePrimRequest::add_attributes()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  ::idtxcore::PrimAttribute* _add =
+      _internal_mutable_attributes()->InternalAddWithArena(
+          ::google::protobuf::MessageLite::internal_visibility(), GetArena());
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000001U);
+  // @@protoc_insertion_point(field_add:idtxcore.CreatePrimRequest.attributes)
+  return _add;
+}
+inline const ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>& CreatePrimRequest::attributes() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_list:idtxcore.CreatePrimRequest.attributes)
+  return _internal_attributes();
+}
+inline const ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>&
+CreatePrimRequest::_internal_attributes() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.attributes_;
+}
+inline ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>* PROTOBUF_NONNULL
+CreatePrimRequest::_internal_mutable_attributes() {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return &_impl_.attributes_;
+}
+
 inline bool CreatePrimRequest::has_transform() const {
   return transform_case() != TRANSFORM_NOT_SET;
 }
@@ -1741,7 +1830,7 @@ inline void CreatePrimBroadcast::clear_parent_path() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.parent_path_.ClearToEmpty();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000001U);
+                  0x00000002U);
 }
 inline const ::std::string& CreatePrimBroadcast::parent_path() const
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -1751,13 +1840,13 @@ inline const ::std::string& CreatePrimBroadcast::parent_path() const
 template <typename Arg_, typename... Args_>
 PROTOBUF_ALWAYS_INLINE void CreatePrimBroadcast::set_parent_path(Arg_&& arg, Args_... args) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
-  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
   _impl_.parent_path_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.parent_path)
 }
 inline ::std::string* PROTOBUF_NONNULL CreatePrimBroadcast::mutable_parent_path()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
   ::std::string* _s = _internal_mutable_parent_path();
   // @@protoc_insertion_point(field_mutable:idtxcore.CreatePrimBroadcast.parent_path)
   return _s;
@@ -1777,10 +1866,10 @@ inline ::std::string* PROTOBUF_NONNULL CreatePrimBroadcast::_internal_mutable_pa
 inline ::std::string* PROTOBUF_NULLABLE CreatePrimBroadcast::release_parent_path() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimBroadcast.parent_path)
-  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000001U)) {
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
     return nullptr;
   }
-  ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
   auto* released = _impl_.parent_path_.Release();
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
     _impl_.parent_path_.Set("", GetArena());
@@ -1790,9 +1879,9 @@ inline ::std::string* PROTOBUF_NULLABLE CreatePrimBroadcast::release_parent_path
 inline void CreatePrimBroadcast::set_allocated_parent_path(::std::string* PROTOBUF_NULLABLE value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
   }
   _impl_.parent_path_.SetAllocated(value, GetArena());
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.parent_path_.IsDefault()) {
@@ -1806,7 +1895,7 @@ inline void CreatePrimBroadcast::clear_prim_name() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.prim_name_.ClearToEmpty();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000002U);
+                  0x00000004U);
 }
 inline const ::std::string& CreatePrimBroadcast::prim_name() const
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -1816,13 +1905,13 @@ inline const ::std::string& CreatePrimBroadcast::prim_name() const
 template <typename Arg_, typename... Args_>
 PROTOBUF_ALWAYS_INLINE void CreatePrimBroadcast::set_prim_name(Arg_&& arg, Args_... args) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
-  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   _impl_.prim_name_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.prim_name)
 }
 inline ::std::string* PROTOBUF_NONNULL CreatePrimBroadcast::mutable_prim_name()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   ::std::string* _s = _internal_mutable_prim_name();
   // @@protoc_insertion_point(field_mutable:idtxcore.CreatePrimBroadcast.prim_name)
   return _s;
@@ -1842,10 +1931,10 @@ inline ::std::string* PROTOBUF_NONNULL CreatePrimBroadcast::_internal_mutable_pr
 inline ::std::string* PROTOBUF_NULLABLE CreatePrimBroadcast::release_prim_name() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimBroadcast.prim_name)
-  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000004U)) {
     return nullptr;
   }
-  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
   auto* released = _impl_.prim_name_.Release();
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
     _impl_.prim_name_.Set("", GetArena());
@@ -1855,9 +1944,9 @@ inline ::std::string* PROTOBUF_NULLABLE CreatePrimBroadcast::release_prim_name()
 inline void CreatePrimBroadcast::set_allocated_prim_name(::std::string* PROTOBUF_NULLABLE value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
   }
   _impl_.prim_name_.SetAllocated(value, GetArena());
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.prim_name_.IsDefault()) {
@@ -1871,7 +1960,7 @@ inline void CreatePrimBroadcast::clear_type() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.type_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000080U);
+                  0x00000100U);
 }
 inline ::idtxcore::PrimType CreatePrimBroadcast::type() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.type)
@@ -1879,7 +1968,7 @@ inline ::idtxcore::PrimType CreatePrimBroadcast::type() const {
 }
 inline void CreatePrimBroadcast::set_type(::idtxcore::PrimType value) {
   _internal_set_type(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.type)
 }
 inline ::idtxcore::PrimType CreatePrimBroadcast::_internal_type() const {
@@ -1893,14 +1982,14 @@ inline void CreatePrimBroadcast::_internal_set_type(::idtxcore::PrimType value) 
 
 // optional double size = 4;
 inline bool CreatePrimBroadcast::has_size() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000010U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000020U);
   return value;
 }
 inline void CreatePrimBroadcast::clear_size() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.size_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000010U);
+                  0x00000020U);
 }
 inline double CreatePrimBroadcast::size() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.size)
@@ -1908,7 +1997,7 @@ inline double CreatePrimBroadcast::size() const {
 }
 inline void CreatePrimBroadcast::set_size(double value) {
   _internal_set_size(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.size)
 }
 inline double CreatePrimBroadcast::_internal_size() const {
@@ -1922,14 +2011,14 @@ inline void CreatePrimBroadcast::_internal_set_size(double value) {
 
 // optional double height = 5;
 inline bool CreatePrimBroadcast::has_height() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000020U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000040U);
   return value;
 }
 inline void CreatePrimBroadcast::clear_height() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.height_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000020U);
+                  0x00000040U);
 }
 inline double CreatePrimBroadcast::height() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.height)
@@ -1937,7 +2026,7 @@ inline double CreatePrimBroadcast::height() const {
 }
 inline void CreatePrimBroadcast::set_height(double value) {
   _internal_set_height(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.height)
 }
 inline double CreatePrimBroadcast::_internal_height() const {
@@ -1951,14 +2040,14 @@ inline void CreatePrimBroadcast::_internal_set_height(double value) {
 
 // optional double radius = 6;
 inline bool CreatePrimBroadcast::has_radius() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000040U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000080U);
   return value;
 }
 inline void CreatePrimBroadcast::clear_radius() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.radius_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000040U);
+                  0x00000080U);
 }
 inline double CreatePrimBroadcast::radius() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.radius)
@@ -1966,7 +2055,7 @@ inline double CreatePrimBroadcast::radius() const {
 }
 inline void CreatePrimBroadcast::set_radius(double value) {
   _internal_set_radius(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.radius)
 }
 inline double CreatePrimBroadcast::_internal_radius() const {
@@ -1980,14 +2069,14 @@ inline void CreatePrimBroadcast::_internal_set_radius(double value) {
 
 // optional string axis = 7;
 inline bool CreatePrimBroadcast::has_axis() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000004U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000008U);
   return value;
 }
 inline void CreatePrimBroadcast::clear_axis() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.axis_.ClearToEmpty();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000004U);
+                  0x00000008U);
 }
 inline const ::std::string& CreatePrimBroadcast::axis() const
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -1997,13 +2086,13 @@ inline const ::std::string& CreatePrimBroadcast::axis() const
 template <typename Arg_, typename... Args_>
 PROTOBUF_ALWAYS_INLINE void CreatePrimBroadcast::set_axis(Arg_&& arg, Args_... args) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
-  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   _impl_.axis_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.axis)
 }
 inline ::std::string* PROTOBUF_NONNULL CreatePrimBroadcast::mutable_axis()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   ::std::string* _s = _internal_mutable_axis();
   // @@protoc_insertion_point(field_mutable:idtxcore.CreatePrimBroadcast.axis)
   return _s;
@@ -2023,10 +2112,10 @@ inline ::std::string* PROTOBUF_NONNULL CreatePrimBroadcast::_internal_mutable_ax
 inline ::std::string* PROTOBUF_NULLABLE CreatePrimBroadcast::release_axis() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimBroadcast.axis)
-  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000004U)) {
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000008U)) {
     return nullptr;
   }
-  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
   auto* released = _impl_.axis_.Release();
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
     _impl_.axis_.Set("", GetArena());
@@ -2036,9 +2125,9 @@ inline ::std::string* PROTOBUF_NULLABLE CreatePrimBroadcast::release_axis() {
 inline void CreatePrimBroadcast::set_allocated_axis(::std::string* PROTOBUF_NULLABLE value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
   }
   _impl_.axis_.SetAllocated(value, GetArena());
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.axis_.IsDefault()) {
@@ -2049,14 +2138,14 @@ inline void CreatePrimBroadcast::set_allocated_axis(::std::string* PROTOBUF_NULL
 
 // optional double width = 8;
 inline bool CreatePrimBroadcast::has_width() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000200U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000400U);
   return value;
 }
 inline void CreatePrimBroadcast::clear_width() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.width_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000200U);
+                  0x00000400U);
 }
 inline double CreatePrimBroadcast::width() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.width)
@@ -2064,7 +2153,7 @@ inline double CreatePrimBroadcast::width() const {
 }
 inline void CreatePrimBroadcast::set_width(double value) {
   _internal_set_width(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000200U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000400U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.width)
 }
 inline double CreatePrimBroadcast::_internal_width() const {
@@ -2078,14 +2167,14 @@ inline void CreatePrimBroadcast::_internal_set_width(double value) {
 
 // optional double length = 9;
 inline bool CreatePrimBroadcast::has_length() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000400U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000800U);
   return value;
 }
 inline void CreatePrimBroadcast::clear_length() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.length_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000400U);
+                  0x00000800U);
 }
 inline double CreatePrimBroadcast::length() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.length)
@@ -2093,7 +2182,7 @@ inline double CreatePrimBroadcast::length() const {
 }
 inline void CreatePrimBroadcast::set_length(double value) {
   _internal_set_length(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000400U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000800U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.length)
 }
 inline double CreatePrimBroadcast::_internal_length() const {
@@ -2107,14 +2196,14 @@ inline void CreatePrimBroadcast::_internal_set_length(double value) {
 
 // optional .idtxcore.PrimRefType ref_type = 10;
 inline bool CreatePrimBroadcast::has_ref_type() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000200U);
   return value;
 }
 inline void CreatePrimBroadcast::clear_ref_type() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.ref_type_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000100U);
+                  0x00000200U);
 }
 inline ::idtxcore::PrimRefType CreatePrimBroadcast::ref_type() const {
   // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.ref_type)
@@ -2122,7 +2211,7 @@ inline ::idtxcore::PrimRefType CreatePrimBroadcast::ref_type() const {
 }
 inline void CreatePrimBroadcast::set_ref_type(::idtxcore::PrimRefType value) {
   _internal_set_ref_type(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000200U);
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.ref_type)
 }
 inline ::idtxcore::PrimRefType CreatePrimBroadcast::_internal_ref_type() const {
@@ -2136,14 +2225,14 @@ inline void CreatePrimBroadcast::_internal_set_ref_type(::idtxcore::PrimRefType 
 
 // optional string reference_path = 11;
 inline bool CreatePrimBroadcast::has_reference_path() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000008U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000010U);
   return value;
 }
 inline void CreatePrimBroadcast::clear_reference_path() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.reference_path_.ClearToEmpty();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000008U);
+                  0x00000010U);
 }
 inline const ::std::string& CreatePrimBroadcast::reference_path() const
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -2153,13 +2242,13 @@ inline const ::std::string& CreatePrimBroadcast::reference_path() const
 template <typename Arg_, typename... Args_>
 PROTOBUF_ALWAYS_INLINE void CreatePrimBroadcast::set_reference_path(Arg_&& arg, Args_... args) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
-  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
   _impl_.reference_path_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
   // @@protoc_insertion_point(field_set:idtxcore.CreatePrimBroadcast.reference_path)
 }
 inline ::std::string* PROTOBUF_NONNULL CreatePrimBroadcast::mutable_reference_path()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
   ::std::string* _s = _internal_mutable_reference_path();
   // @@protoc_insertion_point(field_mutable:idtxcore.CreatePrimBroadcast.reference_path)
   return _s;
@@ -2179,10 +2268,10 @@ inline ::std::string* PROTOBUF_NONNULL CreatePrimBroadcast::_internal_mutable_re
 inline ::std::string* PROTOBUF_NULLABLE CreatePrimBroadcast::release_reference_path() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:idtxcore.CreatePrimBroadcast.reference_path)
-  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000008U)) {
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000010U)) {
     return nullptr;
   }
-  ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000010U);
   auto* released = _impl_.reference_path_.Release();
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
     _impl_.reference_path_.Set("", GetArena());
@@ -2192,9 +2281,9 @@ inline ::std::string* PROTOBUF_NULLABLE CreatePrimBroadcast::release_reference_p
 inline void CreatePrimBroadcast::set_allocated_reference_path(::std::string* PROTOBUF_NULLABLE value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000008U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000010U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000010U);
   }
   _impl_.reference_path_.SetAllocated(value, GetArena());
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.reference_path_.IsDefault()) {
@@ -2343,6 +2432,56 @@ inline ::idtxcore::Matrix4dTransform* PROTOBUF_NONNULL CreatePrimBroadcast::muta
   ::idtxcore::Matrix4dTransform* _msg = _internal_mutable_matrix();
   // @@protoc_insertion_point(field_mutable:idtxcore.CreatePrimBroadcast.matrix)
   return _msg;
+}
+
+// repeated .idtxcore.PrimAttribute attributes = 14;
+inline int CreatePrimBroadcast::_internal_attributes_size() const {
+  return _internal_attributes().size();
+}
+inline int CreatePrimBroadcast::attributes_size() const {
+  return _internal_attributes_size();
+}
+inline ::idtxcore::PrimAttribute* PROTOBUF_NONNULL CreatePrimBroadcast::mutable_attributes(int index)
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_mutable:idtxcore.CreatePrimBroadcast.attributes)
+  return _internal_mutable_attributes()->Mutable(index);
+}
+inline ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>* PROTOBUF_NONNULL CreatePrimBroadcast::mutable_attributes()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000001U);
+  // @@protoc_insertion_point(field_mutable_list:idtxcore.CreatePrimBroadcast.attributes)
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _internal_mutable_attributes();
+}
+inline const ::idtxcore::PrimAttribute& CreatePrimBroadcast::attributes(int index) const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:idtxcore.CreatePrimBroadcast.attributes)
+  return _internal_attributes().Get(index);
+}
+inline ::idtxcore::PrimAttribute* PROTOBUF_NONNULL CreatePrimBroadcast::add_attributes()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  ::idtxcore::PrimAttribute* _add =
+      _internal_mutable_attributes()->InternalAddWithArena(
+          ::google::protobuf::MessageLite::internal_visibility(), GetArena());
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000001U);
+  // @@protoc_insertion_point(field_add:idtxcore.CreatePrimBroadcast.attributes)
+  return _add;
+}
+inline const ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>& CreatePrimBroadcast::attributes() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_list:idtxcore.CreatePrimBroadcast.attributes)
+  return _internal_attributes();
+}
+inline const ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>&
+CreatePrimBroadcast::_internal_attributes() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.attributes_;
+}
+inline ::google::protobuf::RepeatedPtrField<::idtxcore::PrimAttribute>* PROTOBUF_NONNULL
+CreatePrimBroadcast::_internal_mutable_attributes() {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return &_impl_.attributes_;
 }
 
 inline bool CreatePrimBroadcast::has_transform() const {
