@@ -200,6 +200,8 @@ std::string SerializeCreatePrimBroadcast(const Session& session,
         bcast->set_ref_type(prim.ref_type);
         bcast->set_reference_path(prim.reference_path);
     }
+    for (const auto& attribute : prim.attributes)
+        *bcast->add_attributes() = attribute;
 
     if (transform_src && prim.has_transform)
     {
@@ -1725,7 +1727,7 @@ void SessionManager::HandleCommand(Session& session, SnapshotCommand& command)
 
             if (type != idtxcore::PRIM_TYPE_UNSPECIFIED)
             {
-                PrimDispatcher::ReadSchemaDefaults(type, created);
+                PrimDispatcher::ReadAuthoredDimensions(spec, type, created);
             }
             else
             {

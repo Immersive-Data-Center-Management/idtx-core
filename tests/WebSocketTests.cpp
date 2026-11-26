@@ -264,7 +264,8 @@ TEST_CASE("create prim round-trip: ack + broadcast + default attributes")
     CHECK(cp.prim_name()   == "Cube_1");
     CHECK(cp.type()        == idtxcore::PRIM_TYPE_CUBE);
     REQUIRE(cp.has_size());
-    CHECK(cp.size() == doctest::Approx(2.0)); // UsdGeomCube default
+    // 1 m in stage units: the test stage authors no metersPerUnit, so USD's 0.01 applies.
+    CHECK(cp.size() == doctest::Approx(100.0));
     CHECK_FALSE(cp.has_radius());
 
     // The originator also receives a correlating Ack.
@@ -305,8 +306,8 @@ TEST_CASE("create prim: cone reports height, radius and axis")
     REQUIRE(cp.has_height());
     REQUIRE(cp.has_radius());
     REQUIRE(cp.has_axis());
-    CHECK(cp.height() == doctest::Approx(2.0)); // UsdGeomCone defaults
-    CHECK(cp.radius() == doctest::Approx(1.0));
+    CHECK(cp.height() == doctest::Approx(100.0)); // 1 m high, 1 m across, in centimetres
+    CHECK(cp.radius() == doctest::Approx(50.0));
     CHECK(cp.axis()   == "Z");
     CHECK_FALSE(cp.has_size());
 }
